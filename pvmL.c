@@ -2,8 +2,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <mc2023.h>
-#include <lat2eps.h>
+//#include <lat2eps.h>
 #include <monte_carlo.h>
+#include <fhelper.h>
 
 
 void teste(void);
@@ -17,7 +18,7 @@ void atribuirPropriedades(void);
 void criarVizinhos(void);
 int bloqueado(int);
 void interacoes(void);
-unsigned long generateFile(void);
+unsigned int generateFile(void);
 void hoshen_kopelman(int*, int*, int*);
 void verificarLiberdadeVizinhos(int, int);
 int percolates2d(int, int*);
@@ -30,7 +31,7 @@ void time_evolution(void);
 void write(double, int, int, int);
 void updateOldValues(void);
 void interface(void);
-int getInterfacialSizeOfCluster(int*, int*);
+int getInterfacialSizeOfCluster(int*);
 void getBiggestCluster(int*, int*, int);
 void unique_cluster(void);
 
@@ -66,7 +67,7 @@ void unique_cluster(void);
 /******* Par�metros para CONFIGURACAO_I = CIRCULAR *****************/
 #define RAIO                    10          //NAO IMPLEMENTADO AINDA
 
-#define FORCE_SEED              1
+#define FORCE_SEED              0
 /******* Par�metros para CONDICAO DE CONTORNO LINEAR FIXA **********/
 #define FIXED_EXTREMES          1           //CILINDRIC
 #define FIXED_BORDERS           0           //SQUARED
@@ -74,7 +75,7 @@ void unique_cluster(void);
 #define L_FINAL                 256
 /*******************************************************************/
 #define SAVE_CONFIG             1
-#define CONFIG_T0               0
+#define CONFIG_T0               0	
 #define CONFIG_DELTA_T          100000
 #define CONFIG_TF               111000//CONFIG_T0 + 10 * CONFIG_DELTA_T
 
@@ -92,9 +93,9 @@ unsigned int seed;
 FILE *fp1;
 
 int main(void){
-    int lps = 200;//getIntInputFromClient("loops = ", 1, 1e4);
-    if(FORCE_SEED){
-        lps = 1;
+    int lps = 1;//getIntInputFromClient("loops = ", 1, 1e4);
+    if(FORCE_SEED == 0){
+        lps = getIntFromUser("Measures", 1, 1e4);
     }
     iniciar_coleta(lps);
 
@@ -125,6 +126,7 @@ void comecar(int i){
         interface();
     }
     post();
+    fclose(fp1);
 }
 
 void teste(void){
@@ -152,7 +154,6 @@ void post(void){
     free(moveis0);
     free(quaisMoveis0);
 
-    fclose(fp1);
 }
 
 
@@ -189,11 +190,14 @@ void criarPropriedades(void){
 void updateOldValues(void){
     nMoveis0 = nMoveis;
     mag0 = mag;
-    zelotes0 = zelotes;
-    confianca0 = confianca;
-    polaridade0 = polaridade;
-    moveis0 = moveis;
-    quaisMoveis0 = quaisMoveis;
+    for(int i = 0; i < N; i++){
+    	zelotes0[i] = zelotes[i];
+		confianca0[i] = confianca[i];
+		polaridade0[i] = polaridade[i];
+		moveis0[i] = moveis[i];
+		quaisMoveis0[i] = quaisMoveis[i];
+    }
+    
     return;
 }
 
@@ -239,6 +243,7 @@ void interface(void){
       L = (int) l_arr[i];
       N = L * L;
         sprintf(name, "%d", L);
+        post();
         criarVizinhos();
         criarPropriedades();
         atribuirPropriedades();
@@ -248,7 +253,6 @@ void interface(void){
         while(tempo < TEMPO_MAX){
           tempo += 1./nMoveis;
             interacoes();
-            updateOldValues();
             if(tempo >= threshold){
               unique_cluster();
               l0 = l0_int;
@@ -258,6 +262,9 @@ void interface(void){
 
               if(SAVE_CONFIG) save_configuration(tempo, name);
               break;
+            }
+            if(tempo + 1./nMoveis >= threshold){
+            	updateOldValues();
             }
             if(tempo > TEMPO_MAX){
                 break;
@@ -322,7 +329,7 @@ void write(double proxTempo, int z, int z1, int per){
     fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", proxTempo, mag0, z1, z, ncl, zar, per, nMoveis0, interfCol);
     if(SAVE_CONFIG == 1){
         if (proxTempo >= CONFIG_T0 && proxTempo <= CONFIG_TF) {
-            save_configuration(proxTempo, "evolution");
+            //save_configuration(proxTempo, "evolution");
         }
 
     }
@@ -594,49 +601,33 @@ void verificarCruzamentoInterface(){
 }
 
 
-unsigned long generateFile(void){
-  char name[100], context[50];
-  unsigned long seed = (unsigned long) time(NULL);
-  if(seed % 2 == 0) seed += 1;
-  if(FORCE_SEED == 1) seed = (unsigned long) 123456789;
-  switch (CONFIGURACAO_I) {
-    case 1:
-      sprintf(context,"PVM_L%d_IS%d_R%d",L,CONFIGURACAO_I,RAIO);
-  	   break;
-    case 2:
-      sprintf(context,"PVM_L%d_IS%d",L,CONFIGURACAO_I);
-  	  break;
-    case 3:
-      sprintf(context,"PVM_IS%d",CONFIGURACAO_I);
-  		break;
+unsigned int generateFile(void){
+  char context[100];
+  unsigned int id = setupRandom(0);
+  if(FORCE_SEED == 1) id = (unsigned int) 123456789;
+  sprintf(context, "data_pvm_C%d_BC_%d", EVOLUCAO, FIXED_BORDERS + FIXED_EXTREMES);
+  switch(EVOLUCAO){
+  	case 0:
+  		sprintf(context, "_L%d_I%d", L, CONFIGURACAO_I);
+  	case 1:
+  		sprintf(context, "_L%d", L);
+  	case 2:
+  		sprintf(context, "_dE%.4f", deltaEta);
   }
-  int f = 0;
-  while(f == 0){
-    sprintf(name, "%s_%ld.dat", context, seed);
-    fp1 = fopen(name, "r");
-    if(fp1 != NULL){
-      seed += 2;
-    } else {
-      f += 1;
-    }
-    fclose(fp1);
-  }
-
-  sprintf(name, "%s_%ld.dat", context, seed);
-  fp1 = fopen(name, "w");
-
+  fp1 = safeSeedOpen(context, ".dat", &id, FORCE_SEED);
   fprintf(fp1,"# Persistent Voter Model: pvm.c\n");
-  fprintf(fp1,"# Initial state: %d\n",CONFIGURACAO_I);
-  fprintf(fp1,"# Linear size: %d",L);
-  if (CONFIGURACAO_I==1) fprintf(fp1,"  Radius: %d\n",RAIO);
-                   else fprintf(fp1,"\n");
-  fprintf(fp1,"# Maximum simulation time: %d\n",(int)TEMPO_MAX);
+  //fprintf(fp1,"# Initial state: %d\n",CONFIGURACAO_I);
+  //fprintf(fp1,"# Linear size: %d",L);
+  //if (CONFIGURACAO_I==1) fprintf(fp1,"  Radius: %d\n",RAIO);
+    //               else fprintf(fp1,"\n");
+  //fprintf(fp1,"# Maximum simulation time: %d\n",(int)TEMPO_MAX);
   fflush(fp1);
 
-  return seed;
+  return id;
 }
 
 void save_configuration(int qual, char* name){
+/*
 int i;
 char output_file_eps[100];
 
@@ -656,127 +647,57 @@ lat2eps_gen_eps(output_file_eps,0,0,L,L,1,3);
 lat2eps_release();
 
 return;
+*/
 }
 
 void unique_cluster(){
-  int *label, *z0c, *z1c, *arc, *normal_label;
-  int sV1, sV2, zV1, zV2, s0, z0;
-  label = jmalloc(N * sizeof(int));
-  normal_label = jmalloc(N * sizeof(int));
-  z0c = jmalloc(N * sizeof(int));
-  z1c = jmalloc(N * sizeof(int));
-  arc = jmalloc(N * sizeof(int));
-  for (int i = 0; i < N; ++i){
-      label[i] = i;           //label are from cluster with same zealotery and spins
-      normal_label[i] = i;    //normal_label are from clusters with same zealotery
-  }
-
-
-  //diferencia os clusters
-  for (int i = 0; i < N; ++i) {
-    s0 = polaridade0[i]; z0 = zelotes0[i];
-    sV1 = polaridade0[dir[i]]; zV1 = zelotes0[dir[i]];
-    sV2 = polaridade0[baixo[i]]; zV2 = zelotes0[baixo[i]];
-    if(z0 == zV1){
-      unionfind(i, dir[i], normal_label);
-      if(s0 == sV1){
-        unionfind(i, dir[i], label);
-      }
-    }
-    if(z0 == zV2){
-      unionfind(i, baixo[i], normal_label);
-      if(s0 == sV2){
-        unionfind(i, baixo[i], label);
-      }
-    }
-  }
-  if(L == 24){
-    for(int i = 0; i < L; i++){
-      for(int j = 0; j < L; j++){
-        int index = (i * L) + j;
-        printf("%d   ", label[index]);
-      }
-      printf("\n");
-    }
-  }
-
-  int z0_lab = label[0], z1_lab = label[N - 1], s = 0;
-  for(int i = 0; i < N; i++){
-    if(z0_lab == label[i]){
-      z0c[i] = 1;
-    }
-    if(z1_lab == label[i]){
-      z1c[i] = 1;
-      if(L == 16){
-        printf("%d\n", i);
-        s += 1;
-      }
-    }
-  }
-
-  getBiggestCluster(arc, normal_label, 2);
-
-  l0_int = 0;
-  l1_int = 0;
-  l0_int = getInterfacialSizeOfCluster(z0c, arc);
-  l1_int = getInterfacialSizeOfCluster(z1c, arc);
-  free(label);free(z0c); free(z1c);
+  int *label, *lat, *z0c, *z1c;
+	  
+	label = jmalloc(N * sizeof(int));
+	lat = smalloc(N * sizeof(int));
+	z0c = smalloc(N * sizeof(int));
+	z1c = smalloc(N * sizeof(int));
+	for(int i = 0; i < N; i++){
+		lat[i] = polaridade0[i] + 2 * zelotes0[i];
+		z0c[i] = -1;
+		z1c[i] = -1;
+	}
+	  
+  	labelCluster(label, lat, vizinhos, N, 1);
+	int z0_lab = label[0], z1_lab = label[N - 1];
+  	for(int i = 0; i < N; i++){
+		if(z0_lab == label[i]){
+		  z0c[i] = 1;
+		}
+		if(z1_lab == label[i]){
+		  z1c[i] = 1;
+		}
+  	}
+  	l0_int = 0;
+  	l1_int = 0;
+  	l0_int = getInterfacialSizeOfCluster(z0c);
+  	l1_int = getInterfacialSizeOfCluster(z1c);
+  	free(label);free(z0c); free(z1c);
 }
 
-int getInterfacialSizeOfCluster(int *cluster1, int *cluster2){
-  int l = 0, si, zi, viz, lab;
-  for(int i = 0; i < N; i++){
-    lab = cluster1[i];
-    if(lab != 1) continue;
-    si = polaridade0[i]; zi = zelotes0[i];
+int getInterfacialSizeOfCluster(int *cluster1){
+	int l = 0, si, zi, viz, lab;
+	for(int i = 0; i < N; i++){
+    	lab = cluster1[i];
+		if(lab != 1) continue;
+		si = polaridade0[i]; zi = zelotes0[i];
 
-    for(int j = 0; j < 4; j++){
-      viz = vizinhos[i][j];
+		for(int j = 0; j < 4; j++){
+		  viz = vizinhos[i][j];
 
-      if(polaridade0[viz] != si || zelotes0[viz] != zi){
-        l += 1;
-      }
-
-
-    }
-  }
-  return l;
-
+		  if(polaridade0[viz] != si || zelotes0[viz] != zi){
+		    l += 1;
+		  }
+		}
+	}
+  	return l;
 }
 
-void getBiggestCluster(int *biggestCluster, int *label, int config){
-  int *clusterSize_arr = jmalloc(N * sizeof(int));
-  int j;
-  for(int i = 0; i < N; i++) clusterSize_arr[i] = 0;
-  for(int i = 0; i < N; i++){
-    j = label[i];
-    if(config > 1){
-      if(zelotes0[i] == 0){
-        clusterSize_arr[j] += 1;
-      }
-    } else {
-      if(polaridade0[i] == config){
-        clusterSize_arr[j] += 1;
-      }
-    }
-  }
-  int clusterSize = 0, cluster_lab = 0;
-  for(int i = 0; i < N; i++){
-    if(clusterSize <= clusterSize_arr[i]){
-      clusterSize = clusterSize_arr[i];
-      cluster_lab = i;
-    }
-  }
-  for(int i = 0; i < N; i++){
-    if(label[i] == cluster_lab){
-      biggestCluster[i] = 1;
-    } else {
-      biggestCluster[i] = 0;
-    }
-  }
-  free(clusterSize_arr);
-
-}
 
 
 void hoshen_kopelman(int *his0, int *numc, int *per){
