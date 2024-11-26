@@ -5,6 +5,7 @@
 //#include <lat2eps.h>
 #include <monte_carlo.h>
 #include <fhelper.h>
+#include <stdbool.h>
 
 
 void teste(void);
@@ -21,7 +22,7 @@ void interacoes(void);
 unsigned int generateFile(void);
 void hoshen_kopelman(int*, int*, int*);
 void verificarLiberdadeVizinhos(int, int);
-int percolates2d(int, int*);
+bool percolates2d(int, int*);
 void createPerfectLogTable(int*);
 void comecar(int);
 void iniciar_coleta(int);
@@ -34,6 +35,7 @@ void interface(void);
 int getInterfacialSizeOfCluster(int*);
 void getBiggestCluster(int*, int*, int);
 void unique_cluster(void);
+void clusterNumber(int*, int*);
 
 
 /*******************************************************************/
@@ -58,7 +60,7 @@ void unique_cluster(void);
 #define ESCALA                  1           // 0: LINEAR
                                             // 1: LOG
 /********** Par�metros para ESCALA = 1(log) ************************/
-#define MEDIDAS                 140//70
+#define MEDIDAS                 20
 
 /********** Par�metros para EVOLUCAO = 1(consensus) ****************/
 #define DELTAETA_FINAL          1.0
@@ -67,10 +69,14 @@ void unique_cluster(void);
 /******* Par�metros para CONFIGURACAO_I = CIRCULAR *****************/
 #define RAIO                    10          //NAO IMPLEMENTADO AINDA
 
-#define FORCE_SEED              0
+#define FORCE_SEED              1
 /******* Par�metros para CONDICAO DE CONTORNO LINEAR FIXA **********/
-#define FIXED_EXTREMES          1           //CILINDRIC
-#define FIXED_BORDERS           0           //SQUARED
+#define FIXED_BORDERS			1			//non-periodic borders don't interact
+#define B						1			//"b" = "boundry condition"  
+											//0 -> periodic
+											//1 -> dobrushin vertical(periodic horizontally)
+											//2 -> dobrushin horizontal(periodic vertically)
+											//3 -> square		   
 #define L_INICIAL               16
 #define L_FINAL                 256
 /*******************************************************************/
@@ -81,12 +87,12 @@ void unique_cluster(void);
 
 
 
-int *dir, *esq, *cima, *baixo, **vizinhos, *zelotes, *polaridade/*0, 1 */,
+int *cima, *baixo, *esq, *dir, **vizinhos, *zelotes, *polaridade/*0, 1 */,
     *moveis, *quaisMoveis, *tempos, mag, ncl, zar, interfCol;
 int nMoveis0, mag0, *polaridade0, *zelotes0,  *moveis0, *quaisMoveis0,
     l0_int = 0, l1_int = 0, L = LSIZE, N = NSIZE;
 float *confianca0;
-int *v, nMoveis;
+int nMoveis;
 double tempo,deltaEta;
 float *confianca, *o_confianca;
 unsigned int seed;
@@ -103,6 +109,7 @@ int main(void){
 
 void iniciar_coleta(int i){
     int j, t = 0;
+    seed = 0;
     printf("  Starting %d loops for data collection. \n", i);
     for(j = 0; j < i; j++){
         t = 0 - clock();
@@ -115,6 +122,8 @@ void iniciar_coleta(int i){
 
 
 void comecar(int i){
+	seed = generateFile();
+	setupRandom(seed);
     printf("\n    Starting the %dth collection\n", i + 1);
     pre();
     teste();
@@ -141,8 +150,6 @@ void post(void){
     free(cima);
     free(baixo);
     free(vizinhos);
-    free(v);
-    free(tempos);
     free(zelotes);
     free(confianca);
     free(polaridade);
@@ -159,15 +166,8 @@ void post(void){
 
 
 void pre(){
-    seed=0;
-    seed = generateFile();
-    start_randomic(seed);
-
-    criarVizinhos();
-    criarPropriedades();
-
-
-    create_time_table(tempos, TEMPO_MAX, (int) MEDIDAS - 1, ESCALA);
+	criarPropriedades();
+	createNeighboursMatrix(vizinhos, N);
 
     return;
 }
@@ -182,8 +182,7 @@ void criarPropriedades(void){
     moveis0 = jmalloc(N * sizeof(int));
     quaisMoveis = jmalloc(N * sizeof(int));
     quaisMoveis0 = jmalloc(N * sizeof(int));
-
-    tempos = jmalloc(sizeof(int) * MEDIDAS);
+    vizinhos = smalloc(N * sizeof(int*));
 
 }
 
@@ -227,25 +226,23 @@ void consensus(void){
 }
 
 void interface(void){
-  int measures = 20;
-  float *l_arr = jmalloc(20 * sizeof(float));
-  geomProgression(l_arr, L_INICIAL, L_FINAL, measures);
+	float *l_arr = jmalloc(MEDIDAS * sizeof(float));
+	geomProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
 
-  char name[50];
-    L = L_INICIAL;
+	char name[50];
+	
     int threshold = 1e3, l0, l1, lar;
-    deltaEta = 1e-2;
+    deltaEta = DELTAETA_INICIAL;
     threshold = 1e3;
     fprintf(fp1,"#  deltaEta: %.5f\n", deltaEta);
     fprintf(fp1,"#  threshold: %d\n", threshold);
     fprintf(fp1,"#  L    <L0>   <L1>   <L_Ar>\n");
-    for(int i = 0; i < measures; i++){
+    for(int i = 0; i < MEDIDAS; i++){
       L = (int) l_arr[i];
       N = L * L;
         sprintf(name, "%d", L);
         post();
-        criarVizinhos();
-        criarPropriedades();
+        pre();
         atribuirPropriedades();
         updateOldValues();
         tempo = 0.0;
@@ -273,127 +270,68 @@ void interface(void){
     }
 }
 
-
-
-void evolucao(void){
-    int i, z = 0, z1 = 1, per, ti = 0, tiMax = (int) MEDIDAS - 1, oldTempo = CONFIG_T0;
-    double proxTempo;
-    deltaEta = DELTAETA_INICIAL;
-    fprintf(fp1,"# Deta = %.5f\n",deltaEta);
-    fprintf(fp1,"#  t  m  z1  z  ncl z_ar per mob int_cross\n");
-    atribuirPropriedades();
-    tempo = 0.0;
-    while(ti <= tiMax){
-        proxTempo = tempos[ti];
-        while(tempo <= proxTempo && nMoveis > 0){
-            interacoes();
-            tempo += 1./nMoveis;
-            if(nMoveis == 0) tempo = tempos[tiMax];
-
-            if(SAVE_CONFIG == 1){
-                if (tempo >= CONFIG_T0 && tempo <= CONFIG_TF) {
-                    if(tempo > oldTempo){
-                        printf("flash");
-                        save_configuration(tempo, "a");
-                    }
-                }
-            }
-        }
-
-
-        if(tempo >= proxTempo){
-                z = 0;
-                z1 = 0;
-                for(i = 0; i < N; i++){
-                    if(polaridade[i] == 1){
-                        z1 += zelotes[i];
-                    }
-                    z += zelotes[i];
-                }
-                hoshen_kopelman(NULL,&ncl,&per);
-                verificarCruzamentoInterface();
-
-            fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", proxTempo, mag, z1, z, ncl, zar, per, nMoveis, interfCol);
-            fflush(fp1);
-            do{
-                ti += 1;
-            } while(tempos[ti] <= proxTempo);
-
-
-        }
-    }
-    return;
-}
-
 void write(double proxTempo, int z, int z1, int per){
     fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", proxTempo, mag0, z1, z, ncl, zar, per, nMoveis0, interfCol);
     if(SAVE_CONFIG == 1){
         if (proxTempo >= CONFIG_T0 && proxTempo <= CONFIG_TF) {
             //save_configuration(proxTempo, "evolution");
         }
-
+ 
     }
     fflush(fp1);
 }
 
 void time_evolution(void){
     double proxTempo = 0;
-    int tiMax = MEDIDAS - 1, ti = 1, z=0, z1=1, per;
+    float *time_arr;
+    int z = 0, z1 = 1, per;
+    time_arr = smalloc(MEDIDAS * sizeof(float));
+    if(ESCALA == 0){
+    	linearProgression(time_arr, 0, TEMPO_MAX, MEDIDAS);
+    } else {
+	    geomProgression(time_arr, 0, TEMPO_MAX, MEDIDAS);    
+    }
+
     deltaEta = DELTAETA_INICIAL;
     fprintf(fp1,"# Deta = %.5f\n",deltaEta);
     fprintf(fp1,"#  t  m  z1  z  ncl z_ar per mob int_cross\n");
-    double nT = 0;
     atribuirPropriedades();
     updateOldValues();
     tempo = 0.0;
-    proxTempo = tempos[ti];
-
-    while(nMoveis > 0 && tempo <= tempos[tiMax]){
-        interacoes();
-        if(nMoveis == 0) {
-            nT = tempos[tiMax];
-        } else {
-            nT = tempo + 1./nMoveis;
-        }
-        if(nT > proxTempo){
-            z = 0;
-            z1 = 0;
-            for(int i = 0; i < N; i++){
-                if(polaridade0[i] == 1){
-                    z1 += zelotes0[i];
-                }
-                z += zelotes0[i];
+	for(int i = 0; i < MEDIDAS; i++){
+		proxTempo = time_arr[i];
+		while(nMoveis > 0 && tempo < proxTempo){
+			tempo += 1./nMoveis;
+			interacoes();
+			if(tempo + 1./nMoveis >= proxTempo){
+				updateOldValues();
+			}
+		}
+		z = 0;
+        z1 = 0;
+        for(int i = 0; i < N; i++){
+        	if(polaridade0[i] == 1){
+        		z1 += zelotes0[i];
             }
-            hoshen_kopelman(NULL,&ncl,&per);
-            verificarCruzamentoInterface();
-            while(nT > proxTempo){
-                write(proxTempo, z, z1, per);//OLDONES
-                ti += 1;
-                //printf("%.2f %.2f", proxTempo, nT);
-                if(ti > tiMax) break;
-                proxTempo = tempos[ti];
-            }
+            z += zelotes0[i];
         }
-        tempo = nT;
-        updateOldValues();
-    }
+        clusterNumber(&ncl,&per);
+        verificarCruzamentoInterface();
+		write(proxTempo, z, z1, per);
+	}
     return;
 }
 
 void interacoes(void){
     int pPos,pIndice, vIndice, vPos, virouZ = 0, virouN = 0, pZelote, vZelote, pIgual;
 
-    pIndice = (int) (FRANDOM * nMoveis);
+    pIndice = randomInt(nMoveis);
     pPos = moveis[pIndice];
-    vIndice = (int) (FRANDOM * 4);
+    vIndice = randomInt(4);
     vPos = vizinhos[pPos][vIndice];
 
-    if(CONFIGURACAO_I == 2){
-        if((FIXED_EXTREMES == 1 || FIXED_BORDERS == 1) && (pPos < L || pPos >= N - L)) return;
-        if(FIXED_BORDERS == 1 && (((pPos % L) == L - 1) || (pPos % L == 0))) return;
-        if((vPos < L && vIndice == 3)|| (pPos < L && vIndice == 2)) return; //prevents top/bottom interaction
-    }
-
+	if(!isValidInteraction(pPos, vPos, N, B)) return;
+	if(FIXED_BORDERS == 1 && isOnNonPeriodicBorder(pPos, N, B)) return;
     pZelote = zelotes[pPos] == 1;
     vZelote = zelotes[vPos] == 1;
     pIgual = polaridade[pPos] == polaridade[vPos];
@@ -528,66 +466,9 @@ int bloqueado(int ii){
     return (nPolo == 0 || nPolo == 5) && nZelotes == 5;
 }
 
-
-void criarVizinhos(void){
-    int i,j;
-
-    // inicializa listas
-    dir = jmalloc(N * sizeof(int));
-    esq = jmalloc(N * sizeof(int));
-    cima = jmalloc(N * sizeof(int));
-    baixo = jmalloc(N * sizeof(int));
-
-    populacionaVizinhos();
-
-    vizinhos = ((int **)malloc(N*sizeof(int *)));
-    if(vizinhos == NULL){
-        fprintf(stdout,"malloc error (neighbour)\n" );
-        exit(EXIT_FAILURE);
-    }
-    for(i = 0; i < N; i++){
-        vizinhos[i] = jmalloc(4 * sizeof(int)); // ABRE ESPA�O PARA VIZINHOS
-    }
-    for(j = 0; j < N; j++){
-        vizinhos[j][0] = dir[j];
-        vizinhos[j][1] = esq[j];
-        vizinhos[j][2] = cima[j];
-        vizinhos[j][3] = baixo[j];
-    }
-
-    return;
-}
-
-void populacionaVizinhos(void){
-    int i;
-    for(i = 0; i < N; i++){
-        if(i % L == 0) { // LADO ESQUERDO
-            *(esq + i) = i + L - 1;
-            *(dir + i) = i + 1;
-        } else if(i % L == L - 1) { // LADO DIREITO
-            *(dir + i) = i - L + 1;
-            *(esq + i) = i - 1;
-        } else { // MEIO
-            *(dir + i) = i + 1;
-            *(esq + i) = i - 1;
-        }
-        if(i < L) { // CIMA
-            *(cima + i) = i + N - L;
-            *(baixo + i ) = i + L;
-        } else if(i >= N - L) { // BAIXO
-            *(baixo + i ) = i - N + L;
-            *(cima + i) = i - L;
-        } else { // MEIO
-            *(cima + i) = i - L;
-            *(baixo + i ) = i + L;
-        }
-    }
-    return;
-}
-
 void verificarCruzamentoInterface(){
     int n = 0, i, i0 = L * (L - 2) / 2, sUp, sDown, s0 = polaridade0[i0];
-    if(L % 2 == 0 && FIXED_BORDERS == 1){
+    if(L % 2 == 0){
         for(i = 0; i < L; i++){
             sUp = polaridade0[i0 + i];
             sDown = polaridade0[i0 + i + L];
@@ -602,17 +483,17 @@ void verificarCruzamentoInterface(){
 
 
 unsigned int generateFile(void){
-  char context[100];
+  char name[200], context[100];
   unsigned int id = setupRandom(0);
   if(FORCE_SEED == 1) id = (unsigned int) 123456789;
-  sprintf(context, "data_pvm_C%d_BC_%d", EVOLUCAO, FIXED_BORDERS + FIXED_EXTREMES);
+  sprintf(context, "data_pvm_C%d_BC_%d", EVOLUCAO, B);
   switch(EVOLUCAO){
   	case 0:
-  		sprintf(context, "_L%d_I%d", L, CONFIGURACAO_I);
+  		sprintf(name, "%s_L%d_I%d", context, L, CONFIGURACAO_I);
   	case 1:
-  		sprintf(context, "_L%d", L);
+  		sprintf(name, "%s_L%d", context, L);
   	case 2:
-  		sprintf(context, "_dE%.4f", deltaEta);
+  		sprintf(name, "%s_dE%.4f", context, deltaEta);
   }
   fp1 = safeSeedOpen(context, ".dat", &id, FORCE_SEED);
   fprintf(fp1,"# Persistent Voter Model: pvm.c\n");
@@ -677,6 +558,14 @@ void unique_cluster(){
   	l1_int = 0;
   	l0_int = getInterfacialSizeOfCluster(z0c);
   	l1_int = getInterfacialSizeOfCluster(z1c);
+  	if(L == 16){
+  		for(int i = 0; i < L; i++){
+  			for(int j = 0; j < L; j++){
+  				printf("%d ", lat[i * L + j]);
+  			}
+  			printf("\n");
+  		}
+  	}
   	free(label);free(z0c); free(z1c);
 }
 
@@ -698,7 +587,31 @@ int getInterfacialSizeOfCluster(int *cluster1){
   	return l;
 }
 
-
+void clusterNumber(int *nC, int *nPer){
+	int *label, *size, *lat;
+	lat = smalloc(N * sizeof(int));
+	label = smalloc(N * sizeof(int));
+	size = smalloc(N * sizeof(int));
+	for(int i = 0; i < N; i++){
+		lat[i] = polaridade0[i] + 2 * zelotes0[i];
+		size[i] = 0;
+	}
+	labelCluster(label, polaridade0, vizinhos, N, B);
+	for(int i = 0; i < N; i++){
+		size[label[i]] += 1;
+	}
+	*nC = 0;
+	*nPer = 0;
+	for(int i = 0; i < N; i++){
+		if(size[i] > 0){
+			*nC += 1;
+			if(percolates2d(label[i], label)) *nPer += 1;
+		}
+	}
+	free(label);
+	free(lat);
+	free(size);	
+}
 
 void hoshen_kopelman(int *his0, int *numc, int *per){
     int i,j,*label,*siz;
@@ -717,11 +630,13 @@ void hoshen_kopelman(int *his0, int *numc, int *per){
     probpercv1=0;
 
     //diferencia os clusters
+    /*
     for (i = 0; i < N; ++i) {
         if ( (2 * polaridade0[i] + zelotes[i]) == (2 * polaridade0[dir[i]] + zelotes0[dir[i]])) unionfind(i, dir[i], label);
         if ( (2 * polaridade0[i] + zelotes[i]) == (2 * polaridade0[baixo[i]] + zelotes0[baixo[i]])) unionfind(i, baixo[i], label);
     }
 
+*/
     for (i = 0; i < N; ++i){                     /* Measure the cluster sizes */
          j = i;
          while (label[j] != j)                  /* it doesn't point to itself */
@@ -772,18 +687,12 @@ void hoshen_kopelman(int *his0, int *numc, int *per){
 
 
 
-int percolates2d(int qual,int *lab) {
-    int ok1=0,ok2=0;
-    int i,j;
-    for (i = 0; i < N; i += L){
-        ok2 = 0;
-        for (j = i; j < i + L; ++j){
-            if (lab[j] == qual) {
-                ok2=1;
-                break;
-            }
-        }
-        if (ok2 == 0) break;
+bool percolates2d(int qual,int *lab) {
+    bool ok1 = false,ok2 = false;
+    for(int i = L; i < N; i += L){
+    	if(lab[i - 1] == qual) ok1 = true;
+    	if(lab[i] == qual) ok2 = true;
+    	if(ok1 && ok2) break;
     }
-    return ok1 + ok2;
+    return ok1 && ok2;
 }

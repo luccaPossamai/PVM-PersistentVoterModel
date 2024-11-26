@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include <stdbool.h>
 
 unsigned int setupRandom(unsigned int);
 float randomFloat(void);
@@ -17,6 +18,8 @@ void populateNeighbours(int, int*, int*, int*, int*);
 int neighbourOutOfLattice(int, int, int);
 void labelCluster(int*, int*, int**, int, int);
 int unionFind(int*, int, int);
+bool isValidInteraction(int, int, int, int);
+bool isOnNonPeriodicBorder(int, int, int);
 
 unsigned int setupRandom(unsigned int seed){
   if(seed == 0){
@@ -52,6 +55,11 @@ void *smalloc (unsigned int size){
   }
   return ptr;
 }
+
+void sfree(){
+
+}
+
 
 /************************************************
 		Sum of Integers of an array
@@ -161,6 +169,28 @@ void populateNeighbours(int N, int *up, int *down, int *right, int *left){
   }
 }
 
+bool isValidInteraction(int s_index, int v_index, int N,int b){
+	if(b == 0) return true;
+	int L = (int) sqrt(N);
+	bool bottom_interaction = s_index >= N - L && v_index < L;
+	bool up_interaction = s_index < L && v_index >= N - L;
+	bool right_interaction = s_index % L == L - 1 && v_index % L == 0;
+	bool left_interaction = s_index % L == 0 && v_index % L == L - 1;
+	if(b != 1 && (right_interaction || left_interaction)){
+		return false;
+	}
+	if(b != 2 && (up_interaction || bottom_interaction)){
+		return false;
+	}
+	return true;
+}
+bool isOnNonPeriodicBorder(int s, int N, int B){
+	if(B == 0) return false;
+	int L = (int) sqrt(N);
+	if(B != 2 && (s < L || s >= N - L)) return true;
+	if(B != 1 && (s % L == 0 || s % L == L - 1)) return true;
+	return false;
+}
 
 /************************************************
 		Create Clusters Label(H-K)
