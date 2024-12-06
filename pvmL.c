@@ -24,8 +24,8 @@ void hoshen_kopelman(int*, int*, int*);
 void verificarLiberdadeVizinhos(int, int);
 bool percolates2d(int, int*);
 void createPerfectLogTable(int*);
-void comecar(int);
-void iniciar_coleta(int);
+void comecar(void);
+void iniciar_coleta(void);
 void verificarCruzamentoInterface(void);
 void save_configuration(int, char*);
 void time_evolution(void);
@@ -36,22 +36,26 @@ int getInterfacialSizeOfCluster(int*);
 void getBiggestCluster(int*, int*, int);
 void unique_cluster(void);
 void clusterNumber(int*, int*);
+void temporalInterface(void);
+void unique_cluster_var(void);
+int getInterfacialLengthWith(int*, int, int);
 
 
 /*******************************************************************/
 /**                             CONSTANTES                        **/
 /*******************************************************************/
 #define LOOPS                   500
-#define TEMPO_MAX               1e5
+#define TEMPO_MAX               1e3
 #define PASSO_TEMPO             500
-#define DELTAETA_INICIAL        1./1000
+#define DELTAETA_INICIAL        1./100
 #define LSIZE                   128
 #define NSIZE                   LSIZE * LSIZE
 
 
-#define EVOLUCAO                2           // 0: NORMAL
+#define EVOLUCAO                3           // 0: NORMAL
                                             // 1: ATINGIR CONSENSO
-                                            // 2: Interface Lenght
+                                            // 2: Interface Length
+                                            // 3: Temporal Interface Length
 
 #define CONFIGURACAO_I          2           // 1 : CIRCULAR
                                             // 2 : LINEAR**
@@ -60,7 +64,7 @@ void clusterNumber(int*, int*);
 #define ESCALA                  1           // 0: LINEAR
                                             // 1: LOG
 /********** Par�metros para ESCALA = 1(log) ************************/
-#define MEDIDAS                 20
+#define MEDIDAS                 2
 
 /********** Par�metros para EVOLUCAO = 1(consensus) ****************/
 #define DELTAETA_FINAL          1.0
@@ -77,7 +81,7 @@ void clusterNumber(int*, int*);
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square		   
-#define L_INICIAL               16
+#define L_INICIAL               128
 #define L_FINAL                 256
 /*******************************************************************/
 #define SAVE_CONFIG             1
@@ -90,7 +94,7 @@ void clusterNumber(int*, int*);
 int *cima, *baixo, *esq, *dir, **vizinhos, *zelotes, *polaridade/*0, 1 */,
     *moveis, *quaisMoveis, *tempos, mag, ncl, zar, interfCol;
 int nMoveis0, mag0, *polaridade0, *zelotes0,  *moveis0, *quaisMoveis0,
-    l0_int = 0, l1_int = 0, L = LSIZE, N = NSIZE;
+    l0_int, l1_int, lar_int, L = LSIZE, N = NSIZE;
 float *confianca0;
 int nMoveis;
 double tempo,deltaEta;
@@ -99,32 +103,24 @@ unsigned int seed;
 FILE *fp1;
 
 int main(void){
-    int lps = 1;//getIntInputFromClient("loops = ", 1, 1e4);
-    if(FORCE_SEED == 0){
-        lps = getIntFromUser("Measures", 1, 1e4);
-    }
-    iniciar_coleta(lps);
-
+    iniciar_coleta();
 }
 
-void iniciar_coleta(int i){
-    int j, t = 0;
+void iniciar_coleta(void){
+    int t = 0;
     seed = 0;
-    printf("  Starting %d loops for data collection. \n", i);
-    for(j = 0; j < i; j++){
-        t = 0 - clock();
-        comecar(j);
-        t += clock();
-        printf("  Collection concluded, duration time: %.2f seconds \n",(double) t/CLOCKS_PER_SEC);
-    }
+    printf("  Starting data collection. \n");
+    t = 0 - clock();
+    comecar();
+    t += clock();
+    printf("  Collection concluded, duration time: %.2f seconds \n",(double) t/CLOCKS_PER_SEC);
     return;
 }
 
 
-void comecar(int i){
+void comecar(){
 	seed = generateFile();
 	setupRandom(seed);
-    printf("\n    Starting the %dth collection\n", i + 1);
     pre();
     teste();
     if(EVOLUCAO == 0) {
@@ -133,6 +129,8 @@ void comecar(int i){
         consensus();
     } else if(EVOLUCAO == 2){
         interface();
+    } else if(EVOLUCAO == 3){
+    	temporalInterface();
     }
     post();
     fclose(fp1);
@@ -223,6 +221,40 @@ void consensus(void){
         }
         deltaEta *= pow(DELTAETA_FINAL / DELTAETA_INICIAL, 1. / (DELTAETA_MEDIDAS - 1.));
     }
+}
+
+void temporalInterface(void){
+	float *time_arr = smalloc(MEDIDAS * sizeof(float));
+	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	int l0, l1, lar;
+	float nextTime = 0, time = 0;
+    atribuirPropriedades();
+    updateOldValues();
+    deltaEta = DELTAETA_INICIAL;
+    fprintf(fp1,"#  deltaEta: %.5f\n", deltaEta);
+    fprintf(fp1,"#  MaxTime: %d\n", (int)TEMPO_MAX);
+    fprintf(fp1,"# LatLength: %d\n", (int) L);
+    fprintf(fp1,"#  T    L0   L1   L_Ar\n");    
+    for(int i = 0; i < MEDIDAS; i++){
+    	nextTime = time_arr[i];
+    	while(time < nextTime){
+    		time += 1. / nMoveis;
+    		interacoes();
+    		if(time > nextTime){
+    			unique_cluster_var();
+				l0 = l0_int;
+				l1 = l1_int;
+				lar = lar_int;
+				fprintf(fp1, "%.4f %d %d %d\n", nextTime, l0, l1, lar);
+    		}
+    		if(time + 1./nMoveis >= nextTime){
+         		updateOldValues();
+        	}
+    	}
+
+    }
+    free(time_arr);
+
 }
 
 void interface(void){
@@ -530,7 +562,47 @@ lat2eps_release();
 return;
 */
 }
-
+void unique_cluster_var(){
+	int *label_z0, *label_z1;
+	int *mat_z0, *mat_z1;
+	label_z0 = smalloc(N * sizeof(int)); 
+	label_z1 = smalloc(N * sizeof(int)); 
+	mat_z0 = smalloc(N * sizeof(int)); 
+	mat_z1 = smalloc(N * sizeof(int));
+	int sz;
+	for(int i = 0; i < N; i++){
+		sz = polaridade0[i] + 2 * zelotes0[i];
+		mat_z0[i] = sz == 2 ? 1 : 0;
+		mat_z1[i] = sz == 3 ? 1 : 0;
+	}
+	//create 3 matrix, 
+	// mat differ zealotery and spins
+	// mat_z0 unifies agents of sz different of 2
+	// mat_z1 unifies agents of sz different of 3	 
+	labelCluster(label_z0, mat_z0, vizinhos, N, B);
+	labelCluster(label_z1, mat_z1, vizinhos, N, B);
+	l0_int = 0;
+	l1_int = 0;
+	lar_int = 0;
+	l0_int = getInterfacialLengthWith(label_z0, label_z0[0], label_z0[N - 1]);
+	l1_int = getInterfacialLengthWith(label_z1, label_z1[N - 1], label_z1[0]);
+	free(label_z0); free(label_z1); free(mat_z0); free(mat_z1);
+	
+}
+int getInterfacialLengthWith(int* lab, int l1, int l2){
+	int li, lj, length = 0;
+	for(int i = 0; i < N; i++){
+		li = lab[i];
+		if(li != l1) continue;
+		for(int j = 0; j < 4; j++){
+			if(!isValidInteraction(i, vizinhos[i][j], N, B)) continue;
+			lj = lab[vizinhos[i][j]];
+			if(lj != l2) continue;
+			length += 1;
+		}
+	}
+	return length;
+}
 void unique_cluster(){
   int *label, *lat, *z0c, *z1c;
 	  
@@ -558,14 +630,6 @@ void unique_cluster(){
   	l1_int = 0;
   	l0_int = getInterfacialSizeOfCluster(z0c);
   	l1_int = getInterfacialSizeOfCluster(z1c);
-  	if(L == 16){
-  		for(int i = 0; i < L; i++){
-  			for(int j = 0; j < L; j++){
-  				printf("%d ", lat[i * L + j]);
-  			}
-  			printf("\n");
-  		}
-  	}
   	free(label);free(z0c); free(z1c);
 }
 
