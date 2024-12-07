@@ -227,7 +227,7 @@ void temporalInterface(void){
 	float *time_arr = smalloc(MEDIDAS * sizeof(float));
 	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
 	int l0, l1, lar;
-	float nextTime = 0, time = 0;
+	double nextTime = 0;
     atribuirPropriedades();
     updateOldValues();
     deltaEta = DELTAETA_INICIAL;
@@ -238,19 +238,19 @@ void temporalInterface(void){
     for(int i = 0; i < MEDIDAS; i++){
     	nextTime = time_arr[i];
     	while(time < nextTime){
-    		time += 1. / nMoveis;
-    		interacoes();
-    		if(time > nextTime){
-    			unique_cluster_var();
-				l0 = l0_int;
-				l1 = l1_int;
-				lar = lar_int;
-				fprintf(fp1, "%.4f %d %d %d\n", nextTime, l0, l1, lar);
-    		}
-    		if(time + 1./nMoveis >= nextTime){
+    	    if(time + 1./nMoveis >= nextTime){
          		updateOldValues();
         	}
+    		time += 1. / nMoveis;
+    		interacoes();
     	}
+    	
+    	unique_cluster_var();
+		l0 = l0_int;
+		l1 = l1_int;
+		lar = lar_int;
+		fprintf(fp1, "%.4f %d %d %d\n", nextTime, l0, l1, lar);
+    	
 
     }
     free(time_arr);
@@ -353,6 +353,30 @@ void time_evolution(void){
 	}
     return;
 }
+
+void temporalEvolution(void){
+	float *time_arr = smalloc(MEDIDAS * sizeof(float));
+	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	double nextTime = 0;
+    atribuirPropriedades();
+    updateOldValues();
+    deltaEta = DELTAETA_INICIAL; 
+    for(int i = 0; i < MEDIDAS; i++){
+    	nextTime = time_arr[i];
+    	while(time < nextTime && nMoveis != 0){
+    	    if(time + 1./nMoveis >= nextTime){
+         		updateOldValues();
+        	}
+    		time += 1. / nMoveis;
+    		interacoes();
+    	}
+    	//MAKE MEASURES
+
+    }
+    free(time_arr);
+
+}
+
 
 void interacoes(void){
     int pPos,pIndice, vIndice, vPos, virouZ = 0, virouN = 0, pZelote, vZelote, pIgual;
