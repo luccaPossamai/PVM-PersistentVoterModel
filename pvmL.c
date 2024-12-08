@@ -13,9 +13,9 @@ void post(void);
 void pre(void);
 void consensus(void);
 void evolucao(void);
-void criarPropriedades(void);
+void mallocLattice(void);
 void populacionaVizinhos(void);
-void atribuirPropriedades(void);
+void setupInitialConfiguration(void);
 void criarVizinhos(void);
 int bloqueado(int);
 void interacoes(void);
@@ -39,6 +39,7 @@ void clusterNumber(int*, int*);
 void temporalInterface(void);
 void unique_cluster_var(void);
 int getInterfacialLengthWith(int*, int, int);
+void saveConfig(double);
 
 
 /*******************************************************************/
@@ -48,7 +49,7 @@ int getInterfacialLengthWith(int*, int, int);
 #define TEMPO_MAX               1e3
 #define PASSO_TEMPO             500
 #define DELTAETA_INICIAL        1./100
-#define LSIZE                   128
+#define LSIZE                   64
 #define NSIZE                   LSIZE * LSIZE
 
 
@@ -64,7 +65,7 @@ int getInterfacialLengthWith(int*, int, int);
 #define ESCALA                  1           // 0: LINEAR
                                             // 1: LOG
 /********** Par�metros para ESCALA = 1(log) ************************/
-#define MEDIDAS                 2
+#define MEDIDAS                 20
 
 /********** Par�metros para EVOLUCAO = 1(consensus) ****************/
 #define DELTAETA_FINAL          1.0
@@ -92,11 +93,11 @@ int getInterfacialLengthWith(int*, int, int);
 
 
 int *cima, *baixo, *esq, *dir, **vizinhos, *zelotes, *polaridade/*0, 1 */,
-    *moveis, *quaisMoveis, *tempos, mag, ncl, zar, interfCol;
+    *moveis, *quaisMoveis, mag, ncl, zar, interfCol;
 int nMoveis0, mag0, *polaridade0, *zelotes0,  *moveis0, *quaisMoveis0,
     l0_int, l1_int, lar_int, L = LSIZE, N = NSIZE;
 float *confianca0;
-int nMoveis;
+int nMoveis, configSet = 0;
 double tempo,deltaEta;
 float *confianca, *o_confianca;
 unsigned int seed;
@@ -109,11 +110,11 @@ int main(void){
 void iniciar_coleta(void){
     int t = 0;
     seed = 0;
-    printf("  Starting data collection. \n");
+    //printf("#  Starting data collection. \n");
     t = 0 - clock();
     comecar();
     t += clock();
-    printf("  Collection concluded, duration time: %.2f seconds \n",(double) t/CLOCKS_PER_SEC);
+    //printf("#  Collection concluded, duration time: %.2f seconds \n",(double) t/CLOCKS_PER_SEC);
     return;
 }
 
@@ -164,22 +165,23 @@ void post(void){
 
 
 void pre(){
-	criarPropriedades();
+	mallocLattice();
 	createNeighboursMatrix(vizinhos, N);
-
+    setupInitialConfiguration();
+    updateOldValues();
     return;
 }
-void criarPropriedades(void){
-    zelotes = jmalloc(N * sizeof(int));
-    zelotes0 = jmalloc(N * sizeof(int));
-    confianca = jmalloc(N * sizeof(float));
-    confianca0 = jmalloc(N * sizeof(float));
-    polaridade = jmalloc(N * sizeof(int));
-    polaridade0 = jmalloc(N * sizeof(int));
-    moveis = jmalloc(N * sizeof(int));
-    moveis0 = jmalloc(N * sizeof(int));
-    quaisMoveis = jmalloc(N * sizeof(int));
-    quaisMoveis0 = jmalloc(N * sizeof(int));
+void mallocLattice(void){
+    zelotes = smalloc(N * sizeof(int));
+    zelotes0 = smalloc(N * sizeof(int));
+    confianca = smalloc(N * sizeof(float));
+    confianca0 = smalloc(N * sizeof(float));
+    polaridade = smalloc(N * sizeof(int));
+    polaridade0 = smalloc(N * sizeof(int));
+    moveis = smalloc(N * sizeof(int));
+    moveis0 = smalloc(N * sizeof(int));
+    quaisMoveis = smalloc(N * sizeof(int));
+    quaisMoveis0 = smalloc(N * sizeof(int));
     vizinhos = smalloc(N * sizeof(int*));
 
 }
@@ -198,12 +200,10 @@ void updateOldValues(void){
     return;
 }
 
-
 void consensus(void){
     fprintf(fp1,"#  Deta   t  \n");
     deltaEta = DELTAETA_INICIAL;
     while(deltaEta <= DELTAETA_FINAL){
-        atribuirPropriedades();
         tempo = 0.0;
         while(tempo < TEMPO_MAX){
             tempo += 1./nMoveis;
@@ -225,31 +225,38 @@ void consensus(void){
 
 void temporalInterface(void){
 	float *time_arr = smalloc(MEDIDAS * sizeof(float));
-	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	if(ESCALA == 0){
+		geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	} else {
+		linearProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	}
+	
 	int l0, l1, lar;
 	double nextTime = 0;
-    atribuirPropriedades();
-    updateOldValues();
+	tempo = 0.0;
     deltaEta = DELTAETA_INICIAL;
     fprintf(fp1,"#  deltaEta: %.5f\n", deltaEta);
     fprintf(fp1,"#  MaxTime: %d\n", (int)TEMPO_MAX);
     fprintf(fp1,"# LatLength: %d\n", (int) L);
-    fprintf(fp1,"#  T    L0   L1   L_Ar\n");    
+    fprintf(fp1,"#  T    L0   L1   L_Ar\n");  
+    int f = 0;  
     for(int i = 0; i < MEDIDAS; i++){
     	nextTime = time_arr[i];
-    	while(time < nextTime){
-    	    if(time + 1./nMoveis >= nextTime){
+    	while(tempo < nextTime){
+    	    if(tempo + 1./nMoveis >= nextTime){
          		updateOldValues();
         	}
-    		time += 1. / nMoveis;
+    		tempo += 1. / nMoveis;
     		interacoes();
     	}
+    	saveConfig(tempo);
+    	
     	
     	unique_cluster_var();
 		l0 = l0_int;
 		l1 = l1_int;
 		lar = lar_int;
-		fprintf(fp1, "%.4f %d %d %d\n", nextTime, l0, l1, lar);
+		fprintf(fp1, "%.2f %d %d %d\n", nextTime, l0, l1, lar);
     	
 
     }
@@ -258,7 +265,7 @@ void temporalInterface(void){
 }
 
 void interface(void){
-	float *l_arr = jmalloc(MEDIDAS * sizeof(float));
+	float *l_arr = smalloc(MEDIDAS * sizeof(float));
 	geomProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
 
 	char name[50];
@@ -275,8 +282,6 @@ void interface(void){
         sprintf(name, "%d", L);
         post();
         pre();
-        atribuirPropriedades();
-        updateOldValues();
         tempo = 0.0;
         l0 = 0; l1 = 0; lar = 0;
         while(tempo < TEMPO_MAX){
@@ -313,6 +318,30 @@ void write(double proxTempo, int z, int z1, int per){
     fflush(fp1);
 }
 
+void saveConfig(double t){
+	int sz;
+	if(configSet == 0){
+		configSet = 1;
+		printf("set terminal gif animate delay 10 size 800,800\n set output 'animate.gif' \n set size square \nunset key\n");
+	printf("set xrange [-0.5:%.2f]\n", L - 0.5);
+	printf("set yrange [%.2f:-0.5]\n", L - 0.5);
+		
+	printf("set palette defined (0 \"0x0000FF\", 1 \"0xFF0000\", 2 \"0x81C2EF\", 3 \"0xFA8282\")\n");
+	}
+	printf("set label 1 't = %.2f' at screen 0.5, 0.95 center\n", t);
+
+	printf("plot '-' matrix with image\n");
+	for(int i = 0; i < L; i++){
+		for(int j = 0; j < L; j++){
+			sz = polaridade0[j + i * L] + 2 * zelotes0[j + i * L];
+			printf("%d ", sz);
+		}
+		printf("\n");
+	}
+	printf("e\n");
+	fflush(stdout);
+}
+
 void time_evolution(void){
     double proxTempo = 0;
     float *time_arr;
@@ -327,8 +356,6 @@ void time_evolution(void){
     deltaEta = DELTAETA_INICIAL;
     fprintf(fp1,"# Deta = %.5f\n",deltaEta);
     fprintf(fp1,"#  t  m  z1  z  ncl z_ar per mob int_cross\n");
-    atribuirPropriedades();
-    updateOldValues();
     tempo = 0.0;
 	for(int i = 0; i < MEDIDAS; i++){
 		proxTempo = time_arr[i];
@@ -357,8 +384,8 @@ void time_evolution(void){
 void temporalEvolution(void){
 	float *time_arr = smalloc(MEDIDAS * sizeof(float));
 	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
-	double nextTime = 0;
-    atribuirPropriedades();
+	double time = 0.0, nextTime = 0.0;
+    setupInitialConfiguration();
     updateOldValues();
     deltaEta = DELTAETA_INICIAL; 
     for(int i = 0; i < MEDIDAS; i++){
@@ -467,7 +494,7 @@ void verificarLiberdadeVizinhos(int i, int verificarLivre){
 
 
 
-void atribuirPropriedades(void){
+void setupInitialConfiguration(void){
     int i, j = 0;
     ncl = 0;
     mag = 0;
@@ -630,7 +657,7 @@ int getInterfacialLengthWith(int* lab, int l1, int l2){
 void unique_cluster(){
   int *label, *lat, *z0c, *z1c;
 	  
-	label = jmalloc(N * sizeof(int));
+	label = smalloc(N * sizeof(int));
 	lat = smalloc(N * sizeof(int));
 	z0c = smalloc(N * sizeof(int));
 	z1c = smalloc(N * sizeof(int));
@@ -707,8 +734,8 @@ void hoshen_kopelman(int *his0, int *numc, int *per){
 
     //criar uma lista label de 0 a N identificando clusters
     //a lista siz guarda o tamanho da cluster i-esima
-    label = jmalloc(N * sizeof(int));
-    siz = jmalloc(N * sizeof(int));
+    label = smalloc(N * sizeof(int));
+    siz = smalloc(N * sizeof(int));
     for (i = 0; i < N; ++i){
         label[i] = i;
         siz[i] = 0;
