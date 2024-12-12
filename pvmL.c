@@ -85,7 +85,7 @@ void saveConfig(double);
 #define L_INICIAL               128
 #define L_FINAL                 256
 /*******************************************************************/
-#define SAVE_CONFIG             1
+#define SAVE_CONFIG             0
 #define CONFIG_T0               0	
 #define CONFIG_DELTA_T          100000
 #define CONFIG_TF               111000//CONFIG_T0 + 10 * CONFIG_DELTA_T
@@ -239,7 +239,6 @@ void temporalInterface(void){
     fprintf(fp1,"#  MaxTime: %d\n", (int)TEMPO_MAX);
     fprintf(fp1,"# LatLength: %d\n", (int) L);
     fprintf(fp1,"#  T    L0   L1   L_Ar\n");  
-    int f = 0;  
     for(int i = 0; i < MEDIDAS; i++){
     	nextTime = time_arr[i];
     	while(tempo < nextTime){
@@ -249,14 +248,15 @@ void temporalInterface(void){
     		tempo += 1. / nMoveis;
     		interacoes();
     	}
-    	saveConfig(tempo);
-    	
+    	if(SAVE_CONFIG != 0){
+    		saveConfig(tempo);
+    	}
     	
     	unique_cluster_var();
 		l0 = l0_int;
 		l1 = l1_int;
 		lar = lar_int;
-		fprintf(fp1, "%.2f %d %d %d\n", nextTime, l0, l1, lar);
+		fprintf(fp1, "%.2f %d %d %.2f %d\n", nextTime, l0, l1, 0.5F * (l0 + l1), lar);
     	
 
     }
@@ -614,10 +614,11 @@ return;
 */
 }
 void unique_cluster_var(){
-	int *label_z0, *label_z1;
+	int *label_z0, *label_z1, *label_s;
 	int *mat_z0, *mat_z1;
 	label_z0 = smalloc(N * sizeof(int)); 
-	label_z1 = smalloc(N * sizeof(int)); 
+	label_z1 = smalloc(N * sizeof(int));
+	label_s = smalloc(N * sizeof(int));
 	mat_z0 = smalloc(N * sizeof(int)); 
 	mat_z1 = smalloc(N * sizeof(int));
 	int sz;
@@ -632,12 +633,14 @@ void unique_cluster_var(){
 	// mat_z1 unifies agents of sz different of 3	 
 	labelCluster(label_z0, mat_z0, vizinhos, N, B);
 	labelCluster(label_z1, mat_z1, vizinhos, N, B);
+	labelCluster(label_s, polaridade0, vizinhos, N, B);
 	l0_int = 0;
 	l1_int = 0;
 	lar_int = 0;
 	l0_int = getInterfacialLengthWith(label_z0, label_z0[0], label_z0[N - 1]);
 	l1_int = getInterfacialLengthWith(label_z1, label_z1[N - 1], label_z1[0]);
-	free(label_z0); free(label_z1); free(mat_z0); free(mat_z1);
+	lar_int = getInterfacialLengthWith(label_s, label_s[0], label_s[N - 1]);
+	free(label_z0); free(label_z1); free(label_s); free(mat_z0); free(mat_z1);
 	
 }
 int getInterfacialLengthWith(int* lab, int l1, int l2){
