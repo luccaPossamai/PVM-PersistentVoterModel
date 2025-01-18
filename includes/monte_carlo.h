@@ -96,7 +96,6 @@ void geomProgression(float *arr, float start, float end, int size){
   float a = pow(end / start, 1 / (float) N);// 2^{size + 1} = x
   for(int i = 0; i < size; i++){
     arr[i] = start * pow(a, i);
-  	printf("%.2f\n", arr[i]);
   }
   
 }
