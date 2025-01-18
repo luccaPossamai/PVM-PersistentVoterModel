@@ -10,7 +10,7 @@ debug: $(TARGET).c
 	gcc -FORCE_SEED=1 -I$(INCLUDES) -O3 -o run $(TARGET).c -Wall -lm
 	./run
 plot: $(TARGET).c
-	gcc -FORCE_SEED=1  -I$(INCLUDES) -O3 -o run $(TARGET).c -Wall -lm
+	gcc -DFORCE_SEED=1 -DSAVE_CONFIG=1 -I$(INCLUDES) -O3 -o run $(TARGET).c -Wall -lm
 	./run | gnuplot
 clean:
 	rm -f $(TARGET)

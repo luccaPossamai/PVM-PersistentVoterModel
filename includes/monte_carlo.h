@@ -19,6 +19,7 @@ int neighbourOutOfLattice(int, int, int);
 void labelCluster(int*, int*, int**, int, int);
 int unionFind(int*, int, int);
 bool isValidInteraction(int, int, int, int);
+int getInterfacialLengthWith(int*, int**, int, int, int, int);
 bool isOnNonPeriodicBorder(int, int, int);
 
 unsigned int setupRandom(unsigned int seed){
@@ -92,10 +93,12 @@ float sumFloatArray(float *arr, int size){
  ************************************************/
 void geomProgression(float *arr, float start, float end, int size){
   int N = size - 1;
-  float a = pow(end / start, 1 / (float) N);
+  float a = pow(end / start, 1 / (float) N);// 2^{size + 1} = x
   for(int i = 0; i < size; i++){
     arr[i] = start * pow(a, i);
+  	printf("%.2f\n", arr[i]);
   }
+  
 }
 
 /************************************************
@@ -239,6 +242,28 @@ int unionFind(int *lab, int i1_0, int i2_0){
     }
     return I;
 }
+/************************************************
+		Interfacial Length of Cluster with ...
+			-lpcamors(12/24)
+	Measure the length of the cluster(l1) with the
+	other cluster(l2). Uses the H-K algorithm. Sen
+	sitive to boundry conditions. 
+ ************************************************/
+
+int getInterfacialLengthWith(int* lab, int** neig, int l1, int l2, int N, int B){
+	int li, lj, length = 0;
+	for(int i = 0; i < N; i++){
+		li = lab[i];
+		if(li != l1) continue;
+		for(int j = 0; j < 4; j++){
+			if(!isValidInteraction(i, neig[i][j], N, B)) continue;
+			lj = lab[neig[i][j]];
+			if(lj != l2) continue;
+			length += 1;
+		}
+	}
+	return length;
+}
 
 int neighbourOutOfLattice(int s, int n, int N){
   int L = (int) sqrt(N);
@@ -247,3 +272,4 @@ int neighbourOutOfLattice(int s, int n, int N){
   }
   return 0;
 }
+

@@ -6,54 +6,46 @@
 #include <monte_carlo.h>
 #include <fhelper.h>
 #include <stdbool.h>
+#include <ploting.h>
 
 
 void teste(void);
 void post(void);
 void pre(void);
-void consensus(void);
-void evolucao(void);
 void mallocLattice(void);
-void populacionaVizinhos(void);
 void setupInitialConfiguration(void);
-void criarVizinhos(void);
 int bloqueado(int);
 void interacoes(void);
 unsigned int generateFile(void);
 void hoshen_kopelman(int*, int*, int*);
 void verificarLiberdadeVizinhos(int, int);
 bool percolates2d(int, int*);
-void createPerfectLogTable(int*);
 void comecar(void);
 void iniciar_coleta(void);
 void verificarCruzamentoInterface(void);
-void save_configuration(int, char*);
-void time_evolution(void);
-void write(double, int, int, int);
 void updateOldValues(void);
-void interface(void);
 int getInterfacialSizeOfCluster(int*);
-void getBiggestCluster(int*, int*, int);
 void unique_cluster(void);
 void clusterNumber(int*, int*);
-void temporalInterface(void);
-void unique_cluster_var(void);
-int getInterfacialLengthWith(int*, int, int);
+//int getInterfacialLengthWith(int*, int, int);
 void saveConfig(double);
-
+void temporalEvolution(void);
+void latticeEvolution(void);
+void reinforcementEvolution(void);
+void writeInstructions(void);
 
 /*******************************************************************/
 /**                             CONSTANTES                        **/
 /*******************************************************************/
-#define LOOPS                   500
-#define TEMPO_MAX               1e3
-#define PASSO_TEMPO             500
+
+#define TEMPO_MAX               1e5		//Limits the time for measures
+										//Can act like a switch for measures
 #define DELTAETA_INICIAL        1./100
 #define LSIZE                   64
 #define NSIZE                   LSIZE * LSIZE
 
 
-#define EVOLUCAO                3           // 0: NORMAL
+#define EVOLUCAO                2           // 0: NORMAL
                                             // 1: ATINGIR CONSENSO
                                             // 2: Interface Length
                                             // 3: Temporal Interface Length
@@ -61,20 +53,16 @@ void saveConfig(double);
 #define CONFIGURACAO_I          2           // 1 : CIRCULAR
                                             // 2 : LINEAR**
                                             // 3 : ALEATORIO
-/********** Par�metros para EVOLUCAO = 0(normal) *******************/
+/********** Measure parameters = 0(normal) *******************/
 #define ESCALA                  1           // 0: LINEAR
                                             // 1: LOG
-/********** Par�metros para ESCALA = 1(log) ************************/
-#define MEDIDAS                 20
+#define MEDIDAS                 6
 
 /********** Par�metros para EVOLUCAO = 1(consensus) ****************/
 #define DELTAETA_FINAL          1.0
-#define DELTAETA_MEDIDAS        41
 
 /******* Par�metros para CONFIGURACAO_I = CIRCULAR *****************/
 #define RAIO                    10          //NAO IMPLEMENTADO AINDA
-
-#define FORCE_SEED              1
 /******* Par�metros para CONDICAO DE CONTORNO LINEAR FIXA **********/
 #define FIXED_BORDERS			1			//non-periodic borders don't interact
 #define B						1			//"b" = "boundry condition"  
@@ -82,10 +70,16 @@ void saveConfig(double);
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square		   
-#define L_INICIAL               128
+#define L_INICIAL               8
 #define L_FINAL                 256
 /*******************************************************************/
-#define SAVE_CONFIG             0
+#ifndef SAVE_CONFIG
+#define SAVE_CONFIG	0
+#endif
+
+#ifndef FORCE_SEED
+#define FORCE_SEED	0
+#endif
 #define CONFIG_T0               0	
 #define CONFIG_DELTA_T          100000
 #define CONFIG_TF               111000//CONFIG_T0 + 10 * CONFIG_DELTA_T
@@ -96,25 +90,32 @@ int *cima, *baixo, *esq, *dir, **vizinhos, *zelotes, *polaridade/*0, 1 */,
     *moveis, *quaisMoveis, mag, ncl, zar, interfCol;
 int nMoveis0, mag0, *polaridade0, *zelotes0,  *moveis0, *quaisMoveis0,
     l0_int, l1_int, lar_int, L = LSIZE, N = NSIZE;
-float *confianca0;
+float *confianca, *confianca0;
 int nMoveis, configSet = 0;
 double tempo,deltaEta;
-float *confianca, *o_confianca;
 unsigned int seed;
 FILE *fp1;
 
 int main(void){
+	printf("%.2f", pow(256 / 8.0, 1 / (float) (6-1)));	
+	if(SAVE_CONFIG == 1) {
+		startLatticeGif(L);
+		char **l;
+		l = smalloc(4 * sizeof(char*));
+		l[0] = "0xEDC001";
+		l[1] = "0xFFE135";
+		l[2] = "0x4B0082"; 
+		l[3] = "0x663399";
+		setColorPallete(l, 4);
+	}
     iniciar_coleta();
+    if(SAVE_CONFIG == 1) printf("unset output");
+    
 }
 
 void iniciar_coleta(void){
-    int t = 0;
     seed = 0;
-    //printf("#  Starting data collection. \n");
-    t = 0 - clock();
     comecar();
-    t += clock();
-    //printf("#  Collection concluded, duration time: %.2f seconds \n",(double) t/CLOCKS_PER_SEC);
     return;
 }
 
@@ -124,14 +125,15 @@ void comecar(){
 	setupRandom(seed);
     pre();
     teste();
+    writeInstructions();
     if(EVOLUCAO == 0) {
-        time_evolution();
+        temporalEvolution();
     } else if(EVOLUCAO == 1){
-        consensus();
+        reinforcementEvolution();
     } else if(EVOLUCAO == 2){
-        interface();
+        latticeEvolution();
     } else if(EVOLUCAO == 3){
-    	temporalInterface();
+    	temporalEvolution();
     }
     post();
     fclose(fp1);
@@ -140,7 +142,40 @@ void comecar(){
 void teste(void){
 
 }
-
+void writeInstructions(){
+	fprintf(fp1, "# Persistent Voter Model: pvm.c\n");
+	fprintf(fp1, "# Data generated by: L. Possamai\n");
+	fprintf(fp1, "# Seed: %d\n", seed);
+	if(ESCALA == 0){
+		fprintf(fp1, "# Linear Measures: %d\n", MEDIDAS);
+	} else {
+		fprintf(fp1, "# Log Measures: %d\n", MEDIDAS);
+	}
+	
+	switch(EVOLUCAO){	
+		case 0:
+			fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
+			fprintf(fp1, "# L = %d\n", LSIZE);
+			fprintf(fp1, "#  t  m  z1  z  ncl z_ar per mob int_cross\n");
+			break;
+		case 1:
+			fprintf(fp1, "# L = %d\n", LSIZE);
+			fprintf(fp1, "# Tmax = %d\n", (int)TEMPO_MAX);
+			fprintf(fp1, "#  dEta  t\n");
+			break;
+		case 2:
+			fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
+			fprintf(fp1, "# Tau_e = %d\n", (int)TEMPO_MAX);
+			fprintf(fp1, "#  L int_z int_ar\n");
+			break;
+		case 3:
+			fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
+			fprintf(fp1, "# L = %d\n", LSIZE);
+			fprintf(fp1, "# Tau_e = %d\n", (int)TEMPO_MAX);
+			fprintf(fp1, "#  t int_z int_ar\n");
+			break;
+	}
+}
 
 
 void post(void){
@@ -200,174 +235,23 @@ void updateOldValues(void){
     return;
 }
 
-void consensus(void){
-    fprintf(fp1,"#  Deta   t  \n");
-    deltaEta = DELTAETA_INICIAL;
-    while(deltaEta <= DELTAETA_FINAL){
-        tempo = 0.0;
-        while(tempo < TEMPO_MAX){
-            tempo += 1./nMoveis;
-            interacoes();
-            if((mag == 0) || (mag == N)){
-                fprintf(fp1,"%.7f %.6f\n",deltaEta,tempo);
-                fflush(fp1);
-                break;
-            }
-            if(tempo > TEMPO_MAX){
-                fprintf(fp1,"# %.7f %d MAX\n",deltaEta,mag);
-                  fflush(fp1);
-                  break;
-            }
-        }
-        deltaEta *= pow(DELTAETA_FINAL / DELTAETA_INICIAL, 1. / (DELTAETA_MEDIDAS - 1.));
-    }
-}
-
-void temporalInterface(void){
-	float *time_arr = smalloc(MEDIDAS * sizeof(float));
-	if(ESCALA == 0){
-		geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
-	} else {
-		linearProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
-	}
-	
-	int l0, l1, lar;
-	double nextTime = 0;
-	tempo = 0.0;
-    deltaEta = DELTAETA_INICIAL;
-    fprintf(fp1,"#  deltaEta: %.5f\n", deltaEta);
-    fprintf(fp1,"#  MaxTime: %d\n", (int)TEMPO_MAX);
-    fprintf(fp1,"# LatLength: %d\n", (int) L);
-    fprintf(fp1,"#  T    L0   L1   L_Ar\n");  
-    for(int i = 0; i < MEDIDAS; i++){
-    	nextTime = time_arr[i];
-    	while(tempo < nextTime){
-    	    if(tempo + 1./nMoveis >= nextTime){
-         		updateOldValues();
-        	}
-    		tempo += 1. / nMoveis;
-    		interacoes();
-    	}
-    	if(SAVE_CONFIG != 0){
-    		saveConfig(tempo);
-    	}
-    	
-    	unique_cluster_var();
-		l0 = l0_int;
-		l1 = l1_int;
-		lar = lar_int;
-		fprintf(fp1, "%.2f %d %d %.2f %d\n", nextTime, l0, l1, 0.5F * (l0 + l1), lar);
-    	
-
-    }
-    free(time_arr);
-
-}
-
-void interface(void){
-	float *l_arr = smalloc(MEDIDAS * sizeof(float));
-	geomProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
-
-	char name[50];
-	
-    int threshold = 1e3, l0, l1, lar;
-    deltaEta = DELTAETA_INICIAL;
-    threshold = 1e3;
-    fprintf(fp1,"#  deltaEta: %.5f\n", deltaEta);
-    fprintf(fp1,"#  threshold: %d\n", threshold);
-    fprintf(fp1,"#  L    <L0>   <L1>   <L_Ar>\n");
-    for(int i = 0; i < MEDIDAS; i++){
-      L = (int) l_arr[i];
-      N = L * L;
-        sprintf(name, "%d", L);
-        post();
-        pre();
-        tempo = 0.0;
-        l0 = 0; l1 = 0; lar = 0;
-        while(tempo < TEMPO_MAX){
-          tempo += 1./nMoveis;
-            interacoes();
-            if(tempo >= threshold){
-              unique_cluster();
-              l0 = l0_int;
-              l1 = l1_int;
-              fprintf(fp1,"%d %d %d %d\n", L, l0 - L, l1 - L, lar);
-              fflush(fp1);
-
-              if(SAVE_CONFIG) save_configuration(tempo, name);
-              break;
-            }
-            if(tempo + 1./nMoveis >= threshold){
-            	updateOldValues();
-            }
-            if(tempo > TEMPO_MAX){
-                break;
-            }
-        }
-    }
-}
-
-void write(double proxTempo, int z, int z1, int per){
-    fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", proxTempo, mag0, z1, z, ncl, zar, per, nMoveis0, interfCol);
-    if(SAVE_CONFIG == 1){
-        if (proxTempo >= CONFIG_T0 && proxTempo <= CONFIG_TF) {
-            //save_configuration(proxTempo, "evolution");
-        }
- 
-    }
-    fflush(fp1);
-}
-
 void saveConfig(double t){
-	int sz;
-	if(configSet == 0){
-		configSet = 1;
-		printf("set terminal gif animate delay 10 size 800,800\n set output 'animate.gif' \n set size square \nunset key\n");
-	printf("set xrange [-0.5:%.2f]\n", L - 0.5);
-	printf("set yrange [%.2f:-0.5]\n", L - 0.5);
-		
-	printf("set palette defined (0 \"0x0000FF\", 1 \"0xFF0000\", 2 \"0x81C2EF\", 3 \"0xFA8282\")\n");
+	int *sz;
+	sz = smalloc(N * sizeof(int));
+	for(int i = 0; i < N; i++){
+		sz[i] = 2 * polaridade0[i] + zelotes0[i];
 	}
-	printf("set label 1 't = %.2f' at screen 0.5, 0.95 center\n", t);
-
-	printf("plot '-' matrix with image\n");
-	for(int i = 0; i < L; i++){
-		for(int j = 0; j < L; j++){
-			sz = polaridade0[j + i * L] + 2 * zelotes0[j + i * L];
-			printf("%d ", sz);
-		}
-		printf("\n");
-	}
-	printf("e\n");
+	char tLab[10] = "";
+	sprintf(tLab, "%.2f", t);
+	printLabelAt("t", tLab, 0.5, 0.95);
+	printMatrix(sz, L);
 	fflush(stdout);
 }
-
-void time_evolution(void){
-    double proxTempo = 0;
-    float *time_arr;
-    int z = 0, z1 = 1, per;
-    time_arr = smalloc(MEDIDAS * sizeof(float));
-    if(ESCALA == 0){
-    	linearProgression(time_arr, 0, TEMPO_MAX, MEDIDAS);
-    } else {
-	    geomProgression(time_arr, 0, TEMPO_MAX, MEDIDAS);    
-    }
-
-    deltaEta = DELTAETA_INICIAL;
-    fprintf(fp1,"# Deta = %.5f\n",deltaEta);
-    fprintf(fp1,"#  t  m  z1  z  ncl z_ar per mob int_cross\n");
-    tempo = 0.0;
-	for(int i = 0; i < MEDIDAS; i++){
-		proxTempo = time_arr[i];
-		while(nMoveis > 0 && tempo < proxTempo){
-			tempo += 1./nMoveis;
-			interacoes();
-			if(tempo + 1./nMoveis >= proxTempo){
-				updateOldValues();
-			}
-		}
-		z = 0;
-        z1 = 0;
+void takeMeasures(float time){
+	if(EVOLUCAO == 0){
+		int z = 0;
+        int z1 = 0;
+        int per;
         for(int i = 0; i < N; i++){
         	if(polaridade0[i] == 1){
         		z1 += zelotes0[i];
@@ -376,14 +260,26 @@ void time_evolution(void){
         }
         clusterNumber(&ncl,&per);
         verificarCruzamentoInterface();
-		write(proxTempo, z, z1, per);
+        fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", time, mag0, z1, z, ncl, zar, per, nMoveis0, interfCol);
 	}
-    return;
+	if(EVOLUCAO == 2){
+		unique_cluster();
+		fprintf(fp1, "%d %.2f %.2f\n", L, 0.5F * (l0_int + l1_int), (float)lar_int);
+	}
+	if(EVOLUCAO == 3){
+		unique_cluster();
+		fprintf(fp1, "%.2f %.2f %.2f\n", time, 0.5F * (l0_int + l1_int), (float)lar_int);
+	}
 }
 
 void temporalEvolution(void){
 	float *time_arr = smalloc(MEDIDAS * sizeof(float));
-	geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	if(ESCALA == 1){
+		geomProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	} else {
+		linearProgression(time_arr, 1.0, (float)TEMPO_MAX, MEDIDAS);
+	}
+	
 	double time = 0.0, nextTime = 0.0;
     setupInitialConfiguration();
     updateOldValues();
@@ -397,11 +293,69 @@ void temporalEvolution(void){
     		time += 1. / nMoveis;
     		interacoes();
     	}
-    	//MAKE MEASURES
-
+    	takeMeasures(nextTime);
+    	if(SAVE_CONFIG == 1) saveConfig(nextTime);
     }
     free(time_arr);
+}
 
+void latticeEvolution(){
+	float *l_arr = smalloc(MEDIDAS * sizeof(float));
+	if(ESCALA == 1){
+		geomProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
+	} else {
+		linearProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
+	}
+	double threshold = 1.5e3;
+    deltaEta = DELTAETA_INICIAL;
+
+	for(int i = 0; i < MEDIDAS; i++){
+    	L = (int) l_arr[i];
+    	
+    	N = L * L;
+    	
+      	post();
+      	pre();
+      	tempo = 0.0;
+      	while(tempo < TEMPO_MAX){
+      		tempo += 1./nMoveis;
+        	interacoes();
+        	if(tempo >= threshold){
+				takeMeasures(threshold);
+				break;
+        	}
+        	if(tempo + 1./nMoveis >= threshold){
+          		updateOldValues();
+        	}
+        	if(tempo > TEMPO_MAX){
+        		break;
+        	}
+    	}
+    }
+    free(l_arr);
+}
+void reinforcementEvolution(){
+	float *dEtaArr;
+	dEtaArr = smalloc(MEDIDAS * sizeof(float));
+	if(ESCALA == 1){
+		geomProgression(dEtaArr, DELTAETA_INICIAL, DELTAETA_FINAL, MEDIDAS);
+	} else {
+		linearProgression(dEtaArr, DELTAETA_INICIAL, DELTAETA_FINAL, MEDIDAS);
+	}
+    for(int i = 0; i < MEDIDAS; i++){
+    	tempo = 0.0;
+    	deltaEta = (double) dEtaArr[i];
+    	while(tempo < TEMPO_MAX){
+    	    tempo += 1./nMoveis;
+            interacoes();
+            if((mag == 0) || (mag == N)){
+                fprintf(fp1,"%.7f %.6f\n",deltaEta,tempo);
+                fflush(fp1);
+                break;
+            }
+    	}
+    }
+    free(dEtaArr);
 }
 
 
@@ -579,7 +533,7 @@ unsigned int generateFile(void){
   		sprintf(name, "%s_dE%.4f", context, deltaEta);
   }
   fp1 = safeSeedOpen(context, ".dat", &id, FORCE_SEED);
-  fprintf(fp1,"# Persistent Voter Model: pvm.c\n");
+  
   //fprintf(fp1,"# Initial state: %d\n",CONFIGURACAO_I);
   //fprintf(fp1,"# Linear size: %d",L);
   //if (CONFIGURACAO_I==1) fprintf(fp1,"  Radius: %d\n",RAIO);
@@ -590,30 +544,8 @@ unsigned int generateFile(void){
   return id;
 }
 
-void save_configuration(int qual, char* name){
-/*
-int i;
-char output_file_eps[100];
 
-sprintf(output_file_eps,"PVM_%s_%06d.eps",name, qual);
-lat2eps_init(L, L);
-//lat2eps_set_color(0,0x000000); // black, for s=0, normal sites
-//lat2eps_set_color(1,0x31a2f2); // blue, for s=0, zealot sites
-//lat2eps_set_color(2,0xFFFFFF); // white, for s=1, normal sites
-//lat2eps_set_color(3,0xFF0000); // red, for s=1, zealot sites
-lat2eps_set_color(0,0x0000FF); // dark blue, for s=0, normal
-lat2eps_set_color(1,0x81C2EF); // light blue, for s=0, zealot
-lat2eps_set_color(2,0xFF0000); // dark red, for s=1, normal
-lat2eps_set_color(3,0xFA8282); // light red, for s=1, zealot
-for (i=0; i<N; ++i)
-    lat2eps_set_site(i%L,i/L,2*polaridade0[i]+zelotes0[i]);
-lat2eps_gen_eps(output_file_eps,0,0,L,L,1,3);
-lat2eps_release();
-
-return;
-*/
-}
-void unique_cluster_var(){
+void unique_cluster(){
 	int *label_z0, *label_z1, *label_s;
 	int *mat_z0, *mat_z1;
 	label_z0 = smalloc(N * sizeof(int)); 
@@ -637,12 +569,13 @@ void unique_cluster_var(){
 	l0_int = 0;
 	l1_int = 0;
 	lar_int = 0;
-	l0_int = getInterfacialLengthWith(label_z0, label_z0[0], label_z0[N - 1]);
-	l1_int = getInterfacialLengthWith(label_z1, label_z1[N - 1], label_z1[0]);
-	lar_int = getInterfacialLengthWith(label_s, label_s[0], label_s[N - 1]);
+	l0_int = getInterfacialLengthWith(label_z0, vizinhos, label_z0[0], label_z0[N - 1], N, B);
+	l1_int = getInterfacialLengthWith(label_z1, vizinhos, label_z1[N - 1], label_z1[0], N, B);
+	lar_int = getInterfacialLengthWith(label_s, vizinhos, label_s[0], label_s[N - 1], N, B);
 	free(label_z0); free(label_z1); free(label_s); free(mat_z0); free(mat_z1);
 	
 }
+/*
 int getInterfacialLengthWith(int* lab, int l1, int l2){
 	int li, lj, length = 0;
 	for(int i = 0; i < N; i++){
@@ -657,54 +590,7 @@ int getInterfacialLengthWith(int* lab, int l1, int l2){
 	}
 	return length;
 }
-void unique_cluster(){
-  int *label, *lat, *z0c, *z1c;
-	  
-	label = smalloc(N * sizeof(int));
-	lat = smalloc(N * sizeof(int));
-	z0c = smalloc(N * sizeof(int));
-	z1c = smalloc(N * sizeof(int));
-	for(int i = 0; i < N; i++){
-		lat[i] = polaridade0[i] + 2 * zelotes0[i];
-		z0c[i] = -1;
-		z1c[i] = -1;
-	}
-	  
-  	labelCluster(label, lat, vizinhos, N, 1);
-	int z0_lab = label[0], z1_lab = label[N - 1];
-  	for(int i = 0; i < N; i++){
-		if(z0_lab == label[i]){
-		  z0c[i] = 1;
-		}
-		if(z1_lab == label[i]){
-		  z1c[i] = 1;
-		}
-  	}
-  	l0_int = 0;
-  	l1_int = 0;
-  	l0_int = getInterfacialSizeOfCluster(z0c);
-  	l1_int = getInterfacialSizeOfCluster(z1c);
-  	free(label);free(z0c); free(z1c);
-}
-
-int getInterfacialSizeOfCluster(int *cluster1){
-	int l = 0, si, zi, viz, lab;
-	for(int i = 0; i < N; i++){
-    	lab = cluster1[i];
-		if(lab != 1) continue;
-		si = polaridade0[i]; zi = zelotes0[i];
-
-		for(int j = 0; j < 4; j++){
-		  viz = vizinhos[i][j];
-
-		  if(polaridade0[viz] != si || zelotes0[viz] != zi){
-		    l += 1;
-		  }
-		}
-	}
-  	return l;
-}
-
+*/
 void clusterNumber(int *nC, int *nPer){
 	int *label, *size, *lat;
 	lat = smalloc(N * sizeof(int));
@@ -747,14 +633,6 @@ void hoshen_kopelman(int *his0, int *numc, int *per){
     probpercv0=0;
     probpercv1=0;
 
-    //diferencia os clusters
-    /*
-    for (i = 0; i < N; ++i) {
-        if ( (2 * polaridade0[i] + zelotes[i]) == (2 * polaridade0[dir[i]] + zelotes0[dir[i]])) unionfind(i, dir[i], label);
-        if ( (2 * polaridade0[i] + zelotes[i]) == (2 * polaridade0[baixo[i]] + zelotes0[baixo[i]])) unionfind(i, baixo[i], label);
-    }
-
-*/
     for (i = 0; i < N; ++i){                     /* Measure the cluster sizes */
          j = i;
          while (label[j] != j)                  /* it doesn't point to itself */
@@ -796,7 +674,6 @@ void hoshen_kopelman(int *his0, int *numc, int *per){
             zar += siz[i];
 
            }
-    //zar MEDE QUANTOS ZELOTES EXISTEM NA AR, comparar agora com o tamanho m�dio dos clusters na AR (sem separar os zelotes)... a AR deve parar de crescer quando o raio m�dio desses clusters fica maior do que uma parede viaja em 1/deta passos
 
     free(siz); /* from here on, we use the smaller newsiz */
     free(label);
