@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <mc2023.h>
-//#include <lat2eps.h>
 #include <monte_carlo.h>
 #include <fhelper.h>
 #include <stdbool.h>
@@ -27,11 +26,10 @@ void updateOldValues(void);
 int getInterfacialSizeOfCluster(int*);
 void unique_cluster(void);
 void clusterNumber(int*, int*);
-//int getInterfacialLengthWith(int*, int, int);
 void saveConfig(double);
 void temporalEvolution(void);
 void latticeEvolution(void);
-void reinforcementEvolution(void);
+void dEtaEvolution(void);
 void writeInstructions(void);
 
 /*******************************************************************/
@@ -89,7 +87,7 @@ void writeInstructions(void);
 int *cima, *baixo, *esq, *dir, **vizinhos, *zelotes, *polaridade/*0, 1 */,
     *moveis, *quaisMoveis, mag, ncl, zar, interfCol;
 int nMoveis0, mag0, *polaridade0, *zelotes0,  *moveis0, *quaisMoveis0,
-    l0_int, l1_int, lar_int, L = LSIZE, N = NSIZE;
+    l0_int = 0, l1_int = 0, lar_int = 0, L = LSIZE, N = NSIZE;
 float *confianca, *confianca0;
 int nMoveis, configSet = 0;
 double tempo,deltaEta;
@@ -129,7 +127,7 @@ void comecar(){
     if(EVOLUCAO == 0) {
         temporalEvolution();
     } else if(EVOLUCAO == 1){
-        reinforcementEvolution();
+        dEtaEvolution();
     } else if(EVOLUCAO == 2){
         latticeEvolution();
     } else if(EVOLUCAO == 3){
@@ -166,7 +164,7 @@ void writeInstructions(){
 		case 2:
 			fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
 			fprintf(fp1, "# Tau_e = %d\n", (int)TEMPO_MAX);
-			fprintf(fp1, "#  L int_z int_ar\n");
+			fprintf(fp1, "# L Iz(L) Iz(L/2) LOG(Iz(L)) LOG(Iar(L/2)) Iar(L) Iar(L/2) LOG(Iar(L)) LOG(Iar(L/2))\n");
 			break;
 		case 3:
 			fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
@@ -263,8 +261,17 @@ void takeMeasures(float time){
         fprintf(fp1,"%.5f  %d %d %d %d %d %d %d %d\n", time, mag0, z1, z, ncl, zar, per, nMoveis0, interfCol);
 	}
 	if(EVOLUCAO == 2){
+		float l0_old = 0.5F * (l0_int + l1_int);
+		float lar_old = (float) lar_int;
 		unique_cluster();
-		fprintf(fp1, "%d %.2f %.2f\n", L, 0.5F * (l0_int + l1_int), (float)lar_int);
+		float l0 = 0.5F * (l0_int + l1_int);
+		float lar = (float) lar_int;
+		if(1 == 1){
+			fprintf(fp1, "%d %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f\n", L, l0, l0_old, log(l0), log(l0_old), lar, lar_old, log(lar), log(lar_old));
+		} else {
+			fprintf(fp1, "%d %.2f %.2f %.2f %.2f %.2f %.2f\n", L, l0, lar, l0_old, lar_old, log(l0), log(lar));
+		}
+		
 	}
 	if(EVOLUCAO == 3){
 		unique_cluster();
@@ -306,7 +313,9 @@ void latticeEvolution(){
 	} else {
 		linearProgression(l_arr, L_INICIAL, L_FINAL, MEDIDAS);
 	}
-	double threshold = 1.5e3;
+	double threshold = 5e3; 	// 1.5e4 p dEta ~ 1e-3
+								// 1.5e3 p dEta ~ 1e-2
+								// 1.5e2 p dEta ~ 1e-1
     deltaEta = DELTAETA_INICIAL;
 
 	for(int i = 0; i < MEDIDAS; i++){
@@ -334,7 +343,7 @@ void latticeEvolution(){
     }
     free(l_arr);
 }
-void reinforcementEvolution(){
+void dEtaEvolution(){
 	float *dEtaArr;
 	dEtaArr = smalloc(MEDIDAS * sizeof(float));
 	if(ESCALA == 1){
