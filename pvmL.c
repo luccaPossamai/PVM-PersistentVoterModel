@@ -162,7 +162,7 @@ void temporalEvolution(void){
 
 void takeMeasures(double time){
     switch(MODE){
-        case 0:
+        case 0:{
             int nz = 0;
             int s1 = 0;
             int z1 = 0;
@@ -178,6 +178,7 @@ void takeMeasures(double time){
             //verificarCruzamentoInterface();
             fprintf(fp1,"%.2f  %d %d %d %d\n", time, s1, z1, nz, N - nz);
             break;
+        }
         case 1:
             
     }
