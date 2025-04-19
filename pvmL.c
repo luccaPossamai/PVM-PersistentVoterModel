@@ -28,7 +28,7 @@ void temporalEvolution(void);
 #define TMIN               1e0  // cant be 0 for scale log
 //===================================================//
 
-#define MEASURES            60
+#define MEASURES            30
 
 #define C                   1           // 0: Random
                                         // 1: Half
@@ -47,7 +47,7 @@ SquareLattice lattice;
 unsigned int seed;
 FILE *fp1;
 
-float *eta, dEta;
+double *eta, dEta;
 // always use post_s and post_z to measures;
 int *s, *post_s, *z, *post_z;
 
@@ -90,7 +90,7 @@ void memoryAllocation(void){
     post_z = smalloc(N * sizeof(int));
     mobile = smalloc(N * sizeof(int));
     locMobile = smalloc(N * sizeof(int));
-    eta = smalloc(N * sizeof(float));
+    eta = smalloc(N * sizeof(double));
     
 }
 
