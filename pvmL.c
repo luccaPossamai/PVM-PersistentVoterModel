@@ -1,6 +1,7 @@
 //#include <monte_carlo.h>
 #include <lattice.h>
 #include <fhelper.h>
+#include <ploting.h>
 
 void setup(void);
 void mergeOldValues(void);
@@ -23,12 +24,12 @@ void temporalEvolution(void);
 #define DIM                 1
 
 //==================Temp. Evolution==================//
-#define DETA               1e-3
+#define DETA               1e0
 #define TMAX               1e6
 #define TMIN               1e0  // cant be 0 for scale log
 //===================================================//
 
-#define MEASURES            30
+#define MEASURES            60
 
 #define C                   1           // 0: Random
                                         // 1: Half
@@ -36,11 +37,14 @@ void temporalEvolution(void);
                                         // 1: LOG
 #define MODE                0           // 0: Temporal
 #define FIXED_BORDERS       1
+
 #define B					3			    //"b" = "boundry condition"  
         									//0 -> periodic
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square
+#define PLOT                0
+
 
 int N = pow(L, DIM);
 SquareLattice lattice;
