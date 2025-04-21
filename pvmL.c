@@ -2,6 +2,7 @@
 #include <lattice.h>
 #include <fhelper.h>
 #include <ploting.h>
+#include <string.h>
 
 void setup(void);
 void mergeOldValues(void);
@@ -18,32 +19,33 @@ void locMatrixUpdate(int, int, int*, int*);
 void openFile(void);
 void writeInstructions(void);
 void temporalEvolution(void);
+void printAll(void);
 
 #define SEED                0 // 0: random
-#define L                   64
+#define L                   20
 #define DIM                 1
 
 //==================Temp. Evolution==================//
 #define DETA               1e0
 #define TMAX               1e6
-#define TMIN               1e0  // cant be 0 for scale log
+#define TMIN               0  // cant be 0 for scale log
 //===================================================//
 
-#define MEASURES            60
+#define MEASURES            10
 
 #define C                   1           // 0: Random
                                         // 1: Half
-#define SCALE               1           // 0: Linear
+#define SCALE               0           // 0: Linear
                                         // 1: LOG
 #define MODE                0           // 0: Temporal
 #define FIXED_BORDERS       1
 
-#define B					3			    //"b" = "boundry condition"  
+#define B					0			    //"b" = "boundry condition"  
         									//0 -> periodic
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square
-#define PLOT                0
+#define PLOT                1
 
 
 int N = pow(L, DIM);
@@ -64,6 +66,16 @@ int mobileCount, *mobile, *locMobile;
 
 int main(){
     initiateSquareLattice(&lattice, DIM, L);
+    if(PLOT){
+        startLatticeGif(L);
+        char **l;
+		l = smalloc(4 * sizeof(char*));
+		l[0] = "0xEDC001";
+		l[1] = "0xFFE135";
+		l[2] = "0x4B0082"; 
+		l[3] = "0x663399";
+		setColorPallete(l, 4);
+    }
     setup();
     initiate();
     clear();
@@ -138,6 +150,22 @@ void initiate(void){
             temporalEvolution();
     }
 }
+void printAll(){
+    printf("\n%d mobiles: ", mobileCount);
+    for(int i = 0; i < mobileCount; i++){
+        printf("%d ", mobile[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < N; i++){
+        printf("%d ", post_s[i] + 2 * post_z[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < N; i++){
+        printf("%d ", isMobile(i));
+    }
+
+    printf("\n");
+}
 
 void temporalEvolution(void){
     openFile();
@@ -160,6 +188,30 @@ void temporalEvolution(void){
     		singleInteraction();
     	}
     	takeMeasures(nextTime);
+    	
+    	if(PLOT){
+    	    int* s0 = smalloc(N * sizeof(int));
+    	    for(int i = 0; i < N; i++){
+    	        s0[i] = (int)(2 * post_s[i]) + post_z[i];
+    	    }
+    	    printLine(s0, L);
+    	    char timeLabel[100];
+    	    sprintf(timeLabel, "%.2f", nextTime);
+    	    
+    	    char mobilesC[1000];
+    	    sprintf(mobilesC, "%d (", mobileCount);
+    	    char mobilesCC[100];
+    	    for(int i = 0; i < mobileCount; i++){
+    	        sprintf(mobilesCC, "%d ", mobile[i]);
+    	        strcat(mobilesC, mobilesCC);
+    	    }
+    	    strcat(mobilesC, ")");
+    	    
+    	    printLabelAt(" m = ", mobilesC, 0.2, 0.95);
+    	    //printLabelAt(" t = ", timeLabel, 0.5, 0.95);
+    	    
+    	    free(s0);
+    	}
     }
     free(time_arr);
 }
@@ -170,20 +222,28 @@ void takeMeasures(double time){
             int nz = 0;
             int s1 = 0;
             int z1 = 0;
+            
+            int lastZ0 = 0, firstZ1 = L - 1;
             for(int i = 0; i < N; i++){
-            	if(post_s[i] == 1){
-            		z1 += post_z[i];
+            	if(s[i] == 1){
+            		z1 += z[i];
             		s1++;
             		
+                }
+                if(z[i]){
+                    if(s[i] == s[0]){ // last zealot with same opinion as i = 0
+                        lastZ0 = i;
+                    } else if(i < firstZ1) { // first zealot with different opinion of i=0;
+                        firstZ1 = i;
+                    }
                 }
                 nz += z[i];
             }
             //clusterNumber(&ncl,&per);
             //verificarCruzamentoInterface();
-            fprintf(fp1,"%.2f  %d %d %d %d\n", time, s1, z1, nz, N - nz);
+            fprintf(fp1,"%.2f  %d %d %d %d %d\n", time, s1, z1, nz, N - nz, firstZ1 - lastZ0 - 1);
             break;
         }
-        case 1:
             
     }
 
@@ -204,7 +264,6 @@ void singleInteraction(void){
     
 	if(!validInteraction(&lattice, pPos, vPos, B)) return;
 	if(FIXED_BORDERS && (pPos == 0 || pPos == L-1)) return;
-    
     int reinforcementInteraction = s[pPos] == s[vPos];
     
     if(reinforcementInteraction){
@@ -247,17 +306,17 @@ void updateMobileMatrix(int i){
     } else {
         if(locMobile[i] < mobileCount){ // its not mobile but is on the llist
             // change pos of i with the last element of the mobile
-            locMatrixUpdate(i, mobile[mobileCount], mobile, locMobile);
+            locMatrixUpdate(i, mobile[mobileCount - 1], mobile, locMobile);
             
             mobileCount--;
         };
     }
 }
 int isMobile(int i){
-    if(z[i] == 1){
+    if(post_z[i] == 1){
         for(int j = 0; j < lattice.neighbours.neighboursCount; j++){
             int neigIndex = lattice.neighbours.matrix[i][j];
-            if(z[neigIndex] == 0 || s[neigIndex] != s[i]){
+            if(post_s[neigIndex] != s[i]){
                 return 1;
             }
         }
@@ -314,7 +373,7 @@ void writeInstructions(){
 		case 0:
 			fprintf(fp1, "# dEta = %.5f\n", (double)DETA);
 			fprintf(fp1, "# L = %d\n", L);
-			fprintf(fp1, "#  t  nS1  nZ1  nZ nNormal\n");
+			fprintf(fp1, "#  t  nS1  nZ1  nZ nNormal 1dW\n");
 			break;
 		case 1:
 			//fprintf(fp1, "# L = %d\n", LSIZE);
