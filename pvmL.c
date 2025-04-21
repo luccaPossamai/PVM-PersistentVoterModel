@@ -276,7 +276,6 @@ void singleInteraction(void){
         if(z[pPos] == 1){
             post_z[pPos] = 0;
             eta[pPos] = 0.0;
-            changedState = 1;
         } else {
             post_s[pPos] = s[vPos];
             eta[pPos] = 0.0;
