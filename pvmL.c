@@ -17,8 +17,12 @@ void updateMobileMatrix(int);
 int isMobile(int);
 void locMatrixUpdate(int, int, int*, int*);
 void openFile(void);
-void writeInstructions(void);
+void writeInstructions(FILE*, int);
 void temporalEvolution(void);
+void reinforcementEvolution(void);
+float correlationTime(float);
+float timeForWStat(float);
+void evolveSystemTo(float);
 void printAll(void);
 
 #define SEED                0 // 0: random
@@ -26,18 +30,22 @@ void printAll(void);
 #define DIM                 1
 
 //==================Temp. Evolution==================//
-#define DETA               1e0
-#define TMAX               1e6
-#define TMIN               0  // cant be 0 for scale log
+#define DETA                1e0
+#define TMAX                1e6
+#define TMIN                0  // cant be 0 for scale log
+//==================DEta. Evolution==================//
+#define DETAMIN             1e-4
+#define DETAMAX             1e0
+#define LOOPS               1e1
 //===================================================//
 
-#define MEASURES            10
+#define MEASURES            2
 
 #define C                   1           // 0: Random
                                         // 1: Half
-#define SCALE               0           // 0: Linear
+#define SCALE               1           // 0: Linear
                                         // 1: LOG
-#define MODE                0           // 0: Temporal
+#define MODE                1           // 0: Temporal
 #define FIXED_BORDERS       1
 
 #define B					0			    //"b" = "boundry condition"  
@@ -45,15 +53,16 @@ void printAll(void);
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square
-#define PLOT                1
+#define PLOT                0
 
 
 int N = pow(L, DIM);
 SquareLattice lattice;
 unsigned int seed;
-FILE *fp1;
+FILE *fp1, *fCompl;
 
 double *eta, dEta;
+double timeT; 
 // always use post_s and post_z to measures;
 int *s, *post_s, *z, *post_z;
 
@@ -62,7 +71,7 @@ int *s, *post_s, *z, *post_z;
 // locMobile its a matrix of mobile matrix agents index
 // locMobile[i] = index of agent i in mobile matrix
 int mobileCount, *mobile, *locMobile;
-
+float genMeasure;
 
 int main(){
     initiateSquareLattice(&lattice, DIM, L);
@@ -148,8 +157,12 @@ void initiate(void){
     switch(MODE){
         case 0: //temporalEvolution
             temporalEvolution();
+            fclose(fp1);
+        case 1:
+            reinforcementEvolution();
     }
 }
+
 void printAll(){
     printf("\n%d mobiles: ", mobileCount);
     for(int i = 0; i < mobileCount; i++){
@@ -177,16 +190,13 @@ void temporalEvolution(void){
 	}
 	
 	
-	double time = 0.0, nextTime = 0.0;
+	timeT = 0.0;
+	double nextTime = 0.0;
     buildInitialConfiguration();
     dEta = DETA;
     for(int i = 0; i < MEASURES; i++){
     	nextTime = time_arr[i];
-    	while(time < nextTime && mobileCount != 0){
-            mergeOldValues();
-    		time += 1. / mobileCount;
-    		singleInteraction();
-    	}
+        evolveSystemTo(nextTime);
     	takeMeasures(nextTime);
     	
     	if(PLOT){
@@ -197,26 +207,63 @@ void temporalEvolution(void){
     	    printLine(s0, L);
     	    char timeLabel[100];
     	    sprintf(timeLabel, "%.2f", nextTime);
-    	    
-    	    char mobilesC[1000];
-    	    sprintf(mobilesC, "%d (", mobileCount);
-    	    char mobilesCC[100];
-    	    for(int i = 0; i < mobileCount; i++){
-    	        sprintf(mobilesCC, "%d ", mobile[i]);
-    	        strcat(mobilesC, mobilesCC);
-    	    }
-    	    strcat(mobilesC, ")");
-    	    
-    	    printLabelAt(" m = ", mobilesC, 0.2, 0.95);
-    	    //printLabelAt(" t = ", timeLabel, 0.5, 0.95);
+    	    printLabelAt(" t = ", timeLabel, 0.5, 0.95);
     	    
     	    free(s0);
     	}
     }
     free(time_arr);
 }
+void reinforcementEvolution(void){
+    float *deltaEtaArr = smalloc(MEASURES * sizeof(float));
+    if(SCALE){
+		geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, MEASURES);
+	} else {
+		linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, MEASURES);
+	}
+	
+	
+	fCompl = safeOpen("data_MEAN", ".dat"); 
+	writeInstructions(fCompl, 1);
+    for(int i = 0; i < MEASURES; i++){
+        openFile();
+        genMeasure = 0;
+        timeT = 0;
+        dEta = deltaEtaArr[i];
+        buildInitialConfiguration();
+        
+        double nextTime = timeForWStat(dEta);
+        evolveSystemTo(nextTime);
+        
+        for(int l = 0; l < LOOPS; l++){
+            nextTime += correlationTime(dEta);
+            evolveSystemTo(nextTime);
+            takeMeasures(nextTime);
+        }
+        fclose(fp1);
+        fprintf(fCompl, "%.5f %.5f\n", dEta, genMeasure / LOOPS);
+        fflush(fCompl);
+    }
+    fclose(fCompl);
+    free(deltaEtaArr);
+}
 
-void takeMeasures(double time){
+float timeForWStat(float dEta){
+    return 10 / dEta;
+}
+float correlationTime(float dEta){
+    return 10 / dEta;
+}
+void evolveSystemTo(float nextTime){
+    while(timeT < nextTime && mobileCount != 0){
+        mergeOldValues();
+        timeT += 1. / mobileCount;
+    	singleInteraction();
+    }
+}
+
+
+void takeMeasures(double nextTime){
     switch(MODE){
         case 0:{
             int nz = 0;
@@ -241,8 +288,19 @@ void takeMeasures(double time){
             }
             //clusterNumber(&ncl,&per);
             //verificarCruzamentoInterface();
-            fprintf(fp1,"%.2f  %d %d %d %d %d\n", time, s1, z1, nz, N - nz, firstZ1 - lastZ0 - 1);
+            fprintf(fp1,"%.2f  %d %d %d %d %d\n", nextTime, s1, z1, nz, N - nz, firstZ1 - lastZ0 - 1);
             break;
+        }
+        case 1:{
+            int nz = 0;
+            for(int i = 0; i < N; i++){
+                nz += z[i];
+            }
+            genMeasure += nz;
+            fprintf(fp1,"%.2f %d\n", nextTime, nz);
+            break;
+            
+            
         }
             
     }
@@ -352,32 +410,40 @@ void openFile(){
       		break;
     }
     fp1 = safeSeedOpen(name, ".dat", &seed, SEED != 0);
-    writeInstructions();
+    writeInstructions(fp1, 0);
     fflush(fp1);
     
 }
 
-void writeInstructions(){
-	fprintf(fp1, "# Persistent Voter Model: pvm.c\n");
-	fprintf(fp1, "# Data generated by: L. Possamai\n");
-	fprintf(fp1, "# Seed: %d\n", seed);
-	fprintf(fp1, "# Dimension: %d\n", DIM);
+void writeInstructions(FILE* f, int isCompl){
+	fprintf(f, "# Persistent Voter Model: pvm.c\n");
+	fprintf(f, "# Data generated by: L. Possamai\n");
+	fprintf(f, "# Seed: %d\n", seed);
+	fprintf(f, "# Dimension: %d\n", DIM);
 	if(SCALE){
-	    fprintf(fp1, "# Log Measures: %d\n", (int)MEASURES);
+	    fprintf(f, "# Log Measures: %d\n", (int)MEASURES);
 	} else {
-		fprintf(fp1, "# Linear Measures: %d\n", (int)MEASURES);
+		fprintf(f, "# Linear Measures: %d\n", (int)MEASURES);
 	}
 	
 	switch(MODE){	
 		case 0:
-			fprintf(fp1, "# dEta = %.5f\n", (double)DETA);
-			fprintf(fp1, "# L = %d\n", L);
-			fprintf(fp1, "#  t  nS1  nZ1  nZ nNormal 1dW\n");
+			fprintf(f, "# dEta: %.5f\n", (double)DETA);
+			fprintf(f, "# L: %d\n", L);
+			fprintf(f, "#  t  nS1  nZ1  nZ nNormal 1dW\n");
 			break;
 		case 1:
-			//fprintf(fp1, "# L = %d\n", LSIZE);
-			//fprintf(fp1, "# Tmax = %d\n", (int)TEMPO_MAX);
-			//fprintf(fp1, "#  dEta  t\n");
+		
+			fprintf(f, "# L: %d\n", L);
+		    if(isCompl){
+			    fprintf(f, "# dEta: [%.5F, %.5f]\n", DETAMIN, DETAMAX);
+			    fprintf(f, "# loops: %d\n", (int)LOOPS);
+			    fprintf(f, " t <nZ>\n");
+			} else {    
+			    fprintf(f, "# dEta: %.5f\n", (double)DETA);
+			    fprintf(f, " t nZ\n");
+			
+			}
 			break;
 		case 2:
 			//fprintf(fp1, "# dEta = %.5f\n", DELTAETA_INICIAL);
