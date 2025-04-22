@@ -36,7 +36,7 @@ void printAll(void);
 //==================DEta. Evolution==================//
 #define DETAMIN             1e-4
 #define DETAMAX             1e0
-#define LOOPS               1e4
+#define LOOPS               1e0
 //===================================================//
 
 #define MEASURES            2
@@ -158,8 +158,10 @@ void initiate(void){
         case 0: //temporalEvolution
             temporalEvolution();
             fclose(fp1);
+            break;
         case 1:
             reinforcementEvolution();
+            break;
     }
 }
 
@@ -225,7 +227,7 @@ void reinforcementEvolution(void){
 	
 	fCompl = safeOpen("data_MEAN", ".dat"); 
 	writeInstructions(fCompl, 1);
-    for(int i = 0; i < MEASURES; i++){
+    for(int i = 0; i < (int)MEASURES; i++){
         openFile();
         genMeasure = 0;
         timeT = 0;
@@ -235,7 +237,7 @@ void reinforcementEvolution(void){
         double nextTime = timeForWStat(dEta);
         evolveSystemTo(nextTime);
         
-        for(int l = 0; l < LOOPS; l++){
+        for(int l = 0; l < (int)LOOPS; l++){
             nextTime += correlationTime(dEta);
             evolveSystemTo(nextTime);
             takeMeasures(nextTime);
