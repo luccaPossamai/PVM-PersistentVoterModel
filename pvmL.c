@@ -26,7 +26,7 @@ void evolveSystemTo(float);
 void printAll(void);
 
 #define SEED                0 // 0: random
-#define L                   20
+#define L                   150
 #define DIM                 1
 
 //==================Temp. Evolution==================//
@@ -36,7 +36,7 @@ void printAll(void);
 //==================DEta. Evolution==================//
 #define DETAMIN             1e-4
 #define DETAMAX             1e0
-#define LOOPS               1e1
+#define LOOPS               1e4
 //===================================================//
 
 #define MEASURES            2
@@ -436,12 +436,12 @@ void writeInstructions(FILE* f, int isCompl){
 		
 			fprintf(f, "# L: %d\n", L);
 		    if(isCompl){
-			    fprintf(f, "# dEta: [%.5F, %.5f]\n", DETAMIN, DETAMAX);
+			    fprintf(f, "# dEta: [%.5f, %.5f]\n", DETAMIN, DETAMAX);
 			    fprintf(f, "# loops: %d\n", (int)LOOPS);
-			    fprintf(f, " t <nZ>\n");
+			    fprintf(f, "#  t <nZ>\n");
 			} else {    
 			    fprintf(f, "# dEta: %.5f\n", (double)DETA);
-			    fprintf(f, " t nZ\n");
+			    fprintf(f, "#  t nZ\n");
 			
 			}
 			break;
