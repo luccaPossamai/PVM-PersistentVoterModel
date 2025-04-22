@@ -10,7 +10,7 @@ void printLabelAt(char*, char*, float, float);
 
 
 void startLatticeGif(int L){
-	printf("set terminal gif animate delay 20 size 800,800\n");
+	printf("set terminal gif animate delay 100 size 800,800\n");
 	printf("set output 'animate.gif'\n");
 	printf("set size square \n");
 	printf("unset key\n");
@@ -23,6 +23,7 @@ void setColorPallete(char **colorArr, int size){
 		printf(", %d \"%s\"", i, colorArr[i]);
 	}
 	printf(")\n");
+	printf("set cbrange [0:%d]\n", size - 1);
 }
 void printMatrix(int *s, int L){
 	printf("plot '-' matrix with image\n");
@@ -39,9 +40,12 @@ void printLine(int *s, int L){
     
     printf("plot '-' matrix with image\n");
 	for(int i = 0; i < L; i++){
-	    printf("%d ", s[i]);
+	    for(int j = 0; j < L; j++){
+	        printf("%d ", s[j]);
+	    }
+		printf("\n");
 	}
-	printf("\ne\n");
+	printf("e\n");
 	fflush(stdout);
 }
 void printLabelAt(char *valueLabel, char *value, float x, float y){
