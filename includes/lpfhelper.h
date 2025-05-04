@@ -1,11 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/****************LPFileHelper*****************
+    Make writable file more easy to manage
+*********************************************/
+
+
 FILE* safeOpen(char*, char*);
 FILE* safeSeedOpen(char*, char*, unsigned int*, int);
 int existFile(char*);
-int getIntFromUser(char*, int, int);
 
+/*****************safeOpen()******************
+    Open a file with 'name'_0.'extension'
+    Saves with an int count at the end. 
+*********************************************/
 FILE* safeOpen(char *name, char *extension){
 	FILE *f;
 	char name0[50];
@@ -18,6 +26,10 @@ FILE* safeOpen(char *name, char *extension){
 	return f;
 }
 
+/****************existFile()*****************
+    Verify if the file with name exists
+    Require extension
+*********************************************/
 int existFile(char *name){
 	FILE *f;
 	int i = 0;
@@ -29,6 +41,11 @@ int existFile(char *name){
 	return i;
 }
 
+/***************safeSeedOpen()****************
+    Returns a file with an odd seed;
+    If the file exists return the next free 
+    odd seed file;
+*********************************************/
 FILE* safeSeedOpen(char *name, char *extension, unsigned int *seed, int forceSeed){
 	FILE *f;
 	char name0[150];
@@ -40,18 +57,6 @@ FILE* safeSeedOpen(char *name, char *extension, unsigned int *seed, int forceSee
 	} while (existFile(name0) == 1 && forceSeed == 0);
 	f = fopen(name0, "w");
 	return f;
-}
-
-int getIntFromUser(char *message, int min, int max){
-	char input[50], *output, message2[100];
-	int value, i;
-	sprintf(message2, "%s[%d, %d]", message, min, max);
-	do{
-		printf("\n%s: ", message2);
-		i = scanf("%50s", input);
-		value = (int)strtol(input, &output, 10);
-	} while(i <= 0 || *output != '\0' || value < min || value > max);
-	return value;
 }
 
 
