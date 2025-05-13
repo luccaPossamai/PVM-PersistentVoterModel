@@ -39,12 +39,14 @@ int isValidInteraction(SquareLattice*, int, int);
 void labelCluster(int*, int*, SquareLattice*);
 int unionFind(int*, int, int);
 int getInterfacialLengthWith(int*, SquareLattice*, int, int);
-
+int getInterfacialLength(int*, SquareLattice*, int);
+void clusterSizeInfo(int*, int*, int*, int*, int*, SquareLattice*);
 
 
 
 void initiateSquareLattice(SquareLattice *l, int dimension, int L, int B){
     int size = pow(L, dimension);
+    l -> L = L;
     l -> dimension = dimension;
     l -> size = size;
     l -> neighbours = safeMAlloc(sizeof(Neighbours));
@@ -199,6 +201,50 @@ int getInterfacialLengthWith(int* lab, SquareLattice* lattice, int l1, int l2){
 		}
 	}
 	return length;
+}
+
+
+/**********getInterfacialLength()*********
+	Measure the length of the cluster(l1) with
+	the other cluster(l2), ONLY THE INTERFACE
+	WITH l1 and l2. IF THERES ANOTHER CLUSTER
+	WITH INTERFACE WITH L1 
+	Uses the H-K algorithm. Sen
+	sitive to boundry conditions. 
+*********************************************/
+
+int getInterfacialLength(int* lab, SquareLattice* lattice, int l1){
+	int li, length = 0;
+	for(int i = 0; i < lattice->size; i++){
+		li = lab[i];
+		if(li != l1) continue;
+		for(int j = 0; j < lattice->neighbours->neighboursCount; j++){
+		    if(lab[lattice->neighbours->matrix[i][j]] == l1) continue;
+			if(!isValidInteraction(lattice, i, lattice->neighbours->matrix[i][j])) continue;
+            length += 1;
+		}
+	}
+	return length;
+}
+
+void clusterSizeInfo(int *label, int *sizes, int *nClusters, int *biggestClusterLabel, int *secondBiggestClusterLabel, SquareLattice* lattice){
+
+    for(int i = 0; i < lattice->size; i++){
+        sizes[i] = 0;
+    }
+    *biggestClusterLabel = 0;
+    
+    for(int i = 0; i < lattice->size; i++){
+        if(sizes[label[i]] == 0) *nClusters = *nClusters + 1; 
+        sizes[label[i]]++;
+        if(sizes[label[i]] >= sizes[*biggestClusterLabel]){
+            if(label[i] != *biggestClusterLabel){
+                *secondBiggestClusterLabel = *biggestClusterLabel;
+            }
+            *biggestClusterLabel = label[i];  
+        }
+    }
+    
 }
 
 
