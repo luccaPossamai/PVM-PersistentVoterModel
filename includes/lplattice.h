@@ -229,20 +229,31 @@ int getInterfacialLength(int* lab, SquareLattice* lattice, int l1){
 
 void clusterSizeInfo(int *label, int *sizes, int *nClusters, int *biggestClusterLabel, int *secondBiggestClusterLabel, SquareLattice* lattice){
 
-    for(int i = 0; i < lattice->size; i++){
+	for(int i = 0; i < lattice->size; i++){
         sizes[i] = 0;
     }
+    *nClusters = 0;
     *biggestClusterLabel = 0;
-    
+    *secondBiggestClusterLabel = -1;
     for(int i = 0; i < lattice->size; i++){
         if(sizes[label[i]] == 0) *nClusters = *nClusters + 1; 
         sizes[label[i]]++;
-        if(sizes[label[i]] >= sizes[*biggestClusterLabel]){
-            if(label[i] != *biggestClusterLabel){
-                *secondBiggestClusterLabel = *biggestClusterLabel;
-            }
-            *biggestClusterLabel = label[i];  
+        if(label[i] != *biggestClusterLabel){
+        	if(sizes[label[i]] >= sizes[*biggestClusterLabel]){
+        		*secondBiggestClusterLabel = *biggestClusterLabel;
+            	*biggestClusterLabel = label[i];  
+        	} else {
+        		if(label[i] != *secondBiggestClusterLabel){
+        			if(*secondBiggestClusterLabel == -1 || sizes[label[i]] >= sizes[*secondBiggestClusterLabel]){
+        			*secondBiggestClusterLabel = label[i];
+        			}
+        		}
+        		
+        	}
         }
+    }
+    if(*secondBiggestClusterLabel == -1){
+    	*secondBiggestClusterLabel = *biggestClusterLabel;
     }
     
 }
