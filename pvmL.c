@@ -36,7 +36,7 @@ void write1DInstructions(FILE*, int);
 #define DIM                 2
 
 //====================Generic.Evolution================//
-#define DETA                1e-2
+#define DETA                1e-4
 
 //==================Temp. Evolution==================//
 #define TMAX                1e6
@@ -69,9 +69,9 @@ void write1DInstructions(FILE*, int);
                                         // 2: Spatial
 
 //=================Boundry Condition=================//
-#define FIXED_BORDERS       0
+#define FIXED_BORDERS       1
 
-#define B				    0			    //"b" = "boundry condition"
+#define B				    3			    //"b" = "boundry condition"
         									//0 -> periodic
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
@@ -457,8 +457,9 @@ void singleInteraction(void){
 	        }
 
 	    } else if(DIM == 2){
-	        int on2DBorder = pPos < LSIZE || pPos >= N - LSIZE;
-	        on2DBorder |= (B == 3 && (pPos % LSIZE == 0 || pPos % LSIZE == LSIZE - 1));
+	    	int x = pPos % LSIZE, y = pPos / LSIZE;
+	        int on2DBorder = y == 0 || y == LSIZE - 1;
+	        on2DBorder |= (B == 3 && (x == 0 || x == LSIZE - 1));
 	        if(on2DBorder) {
 	            //printf("%d\n", pPos);
 	            return;
