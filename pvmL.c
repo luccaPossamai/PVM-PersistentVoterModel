@@ -17,29 +17,31 @@ void singleInteraction(void);
 void updateMobileMatrix(int);
 int isMobile(int);
 void locMatrixUpdate(int, int, int*, int*);
-void openFile(void);
 void temporalEvolution(void);
 void reinforcementEvolution(void);
 void lengthEvolution(void);
+void inversionTime1D(void);
 float correlationTime(float);
 float timeForWStat(float);
 void evolveSystemTo(double);
 void printAll(void);
-void writeInstructions(FILE*, int);
-void write2DInstructions(FILE*, int);
-void write1DInstructions(FILE*, int);
+void openFile(FILE*, char*);
+void w1DBorders(int*, int*);
+void writeInstructions(FILE*, int, int);
+void write2DInstructions(FILE*, int, int);
+void write1DInstructions(FILE*, int, int);
 
 #define SEED                0 // 0: random
 
 //==================Lattice Config.==================//
 #define LSIZE               128
-#define DIM                 2
+#define DIM                 1
 
 //====================Generic.Evolution================//
-#define DETA                1e-4
+#define DETA                1e-3
 
 //==================Temp. Evolution==================//
-#define TMAX                1e6
+#define TMAX                1e7
 #define TMIN                1e0  // cant be 0 for scale log
 
 //==================Length. Evolution================//
@@ -51,27 +53,27 @@ void write1DInstructions(FILE*, int);
 #define DETAMAX             1e0
 
 //===============Initial Configuration===============//
-#define C                   2           // 0: Random
+#define C                   1           // 0: Random
                                         // 1: Half(Z/Z)
                                         // 2: Circular
 
 
 //===============Measures Configuration==============//
 
-#define MEASURES            60          // Number of evolution tics
+#define MEASURES            1e6         // Number of evolution tics
 #define LOOPS               1e1         // Number of loops(only valid for non temporal evolutions)
 #define SCALE               1           // 0: Linear
                                         // 1: LOG
-#define MODE                1           // 0: Number of zealots
+#define MODE                0           // 0: Number of zealots
                                         // 1: cluster
-#define EVOLUTION           0           // 0: Temporal
+#define EVOLUTION           4           // 0: Temporal
                                         // 2: Length Reinforcement
                                         // 2: Spatial
 
 //=================Boundry Condition=================//
 #define FIXED_BORDERS       1
 
-#define B				    3			    //"b" = "boundry condition"
+#define B				    1			    //"b" = "boundry condition"
         									//0 -> periodic
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
@@ -109,6 +111,25 @@ int main(){
     return 0;
 }
 
+void initiate(void){
+	if(EVOLUTION > 2){
+		if(DIM == 1){
+			inversionTime1D();
+		}	
+	}
+    switch(EVOLUTION){
+        case 0: //temporalEvolution
+            temporalEvolution();
+            fclose(fp1);
+            break;
+        case 1:
+            reinforcementEvolution();
+            break;
+        case 2:
+            lengthEvolution();
+            break;
+    }
+}
 
 
 
@@ -184,20 +205,7 @@ void buildInitialMobileMatrix(void){
         }
     }
 }
-void initiate(void){
-    switch(EVOLUTION){
-        case 0: //temporalEvolution
-            temporalEvolution();
-            fclose(fp1);
-            break;
-        case 1:
-            reinforcementEvolution();
-            break;
-        case 2:
-            lengthEvolution();
-            break;
-    }
-}
+
 
 void printAll(){
     for(int i = 0; i < N; i++){
@@ -211,7 +219,8 @@ void printAll(){
 
 
 void temporalEvolution(void){
-    openFile();
+    openFile(fp1, "temporal");
+    writeInstructions(fp1, 0, 0);
 	float *time_arr = safeMAlloc(MEASURES * sizeof(float));
 	if(SCALE){
 		geomProgression(time_arr, (float)TMIN, (float)TMAX, MEASURES);
@@ -223,8 +232,8 @@ void temporalEvolution(void){
 	timeT = 0.0;
 	double nextTime = 0.0;
     buildInitialConfiguration();
-    
     dEta = (double)DETA;
+    
     for(int i = 0; i < MEASURES; i++){
     	nextTime = (double)time_arr[i];
         evolveSystemTo(nextTime);
@@ -235,14 +244,14 @@ void temporalEvolution(void){
 }
 
 void lengthEvolution(void){
+	openFile(fCompl, "length_MEAN");
+	writeInstructions(fCompl, MODE, 1);
 	float *lengthArr = safeMAlloc((int)MEASURES * sizeof(float));
 	if(SCALE){
 		geomProgression(lengthArr, (float)LMIN, (float)LMAX, (int)MEASURES);
 	} else {
 		linearProgression(lengthArr, (float)LMIN, (float)LMAX, (int)MEASURES);
   	}
-  	fCompl = safeOpen("data_MEAN", ".dat");
-	writeInstructions(fCompl, 1);
   	dEta = (double)DETA;
   	for(int i = 0; i < (int)MEASURES; i++){
     	
@@ -251,7 +260,8 @@ void lengthEvolution(void){
 		
 		initiateSquareLattice(&lattice, DIM, length, B);
 		N = (int)pow(length, DIM);
-  		openFile();
+  		openFile(fp1, "length");
+		writeInstructions(fp1, MODE, 0);
   		//printf("S %d %d %d\n", length, lattice.L, N);
 		setup();
 
@@ -274,6 +284,8 @@ void lengthEvolution(void){
 }
 
 void reinforcementEvolution(void){
+	openFile(fCompl, "reinforcement_MEAN");
+	writeInstructions(fCompl, MODE, 1);
     float *deltaEtaArr = safeMAlloc((int)MEASURES * sizeof(float));
     if(SCALE){
 		    geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
@@ -281,11 +293,9 @@ void reinforcementEvolution(void){
 		    linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
 	  }
 
-
-	fCompl = safeOpen("data_MEAN", ".dat");
-	writeInstructions(fCompl, 1);
     for(int i = 0; i < (int)MEASURES; i++){
-        openFile();
+        openFile(fp1, "reinforcement");
+		writeInstructions(fp1, MODE, 0);
         genMeasure = 0;
         timeT = 0;
         dEta = deltaEtaArr[i];
@@ -308,7 +318,7 @@ void reinforcementEvolution(void){
 }
 
 float timeForWStat(float dEta){
-    return 10 / dEta;
+    return 1.0e2 / dEta;
 }
 float correlationTime(float dEta){
     return 10 / dEta;
@@ -325,6 +335,68 @@ void evolveSystemTo(double nextTime){
     	}
     	singleInteraction();
     }
+}
+
+void inversionTime1D(){
+	dEta = (double)DETA;
+	char a[100] = "";
+	sprintf(a, "step_time_dEtae%d", (int)log10(dEta));
+	openFile(fp1, a);
+	writeInstructions(fp1, 3, 0);
+	timeT = 0.0;
+	double nTime, lastTime;
+    buildInitialConfiguration();
+    
+	evolveSystemTo((double)timeForWStat(dEta));//
+	for(int i = 0; i < MEASURES; i++){
+		lastTime = timeT;
+		int b01, b02, b1, b2, b1Last, b2Last;
+		w1DBorders(&b01, &b02);
+		b1 = b01; b1Last = b1;
+		b2 = b02; b2Last = b2;
+		int d1 = b1 - b1Last, d2 = b2 - b2Last;
+		while(1){
+			nTime = timeT + 1. / (double) mobileCount;
+			evolveSystemTo((double)nTime);
+			w1DBorders(&b1, &b2);
+			
+			d1 = b1 - b1Last;
+			d2 = b2 - b2Last;
+			if(d1 < 0){
+				fprintf(fp1, "%.2f %d\n", timeT - lastTime, b1 - b01 - d1);
+				fflush(fp1);
+				break;
+			} else if(d2 < 0) {
+				fprintf(fp1, "%.2f %d\n", timeT - lastTime, b2 - b02 - d2);
+				fflush(fp1);
+				break;
+			}
+			b1Last = b1; b2Last = b2;
+		}
+		evolveSystemTo(timeT + (double)correlationTime(dEta));
+	}
+	fclose(fp1);
+}
+
+void w1DBorders(int *b1, int *b2){
+	int f1 = 1, f2 = f1, i1 = 0, i2 = lattice.size - 1;
+	for(int i = 0; i < lattice.size; i++){
+		if(f1){
+			if(s[i] == s[i1] && z[i]){
+				*b1 = i;
+			} else {
+				f1 = 0;
+			}
+		}
+		int j = i2 - i;
+		if(f2){
+			if(s[j] == s[i2]){
+				*b2 = j;
+			} else {
+				f2 = 0;
+			}
+		}
+	}
 }
 
 
@@ -540,27 +612,16 @@ void locMatrixUpdate(int s1, int s2, int *mat, int *locMat){
 
 }
 
-void openFile(){
+void openFile(FILE* f, char *prefix){
     seed = setupRandom(SEED);
     char name[100];
-    switch(MODE){
-      	case 0:
-      		sprintf(name, "data_pvm_Ev%d_C%d_B_%d_L%d", MODE, C, B, LSIZE);
-      		break;
-      	case 1:
-      		sprintf(name, "data_pvm_Ev%d_C%d_B_%d_L%d", MODE, C, B, LSIZE);
-            break;
-      	case 2:
-      		sprintf(name, "data_pvm_Ev%d_C%d_B_%d_dE%.4f", MODE, C, B, dEta);
-      		break;
-    }
+    sprintf(name, "data_pvm_%s", prefix);
     fp1 = safeSeedOpen(name, ".dat", &seed, SEED != 0);
-    writeInstructions(fp1, 0);
     fflush(fp1);
 
 }
 
-void writeInstructions(FILE* f, int isCompl){
+void writeInstructions(FILE* f, int mode, int isCompl){
 
 	fprintf(f, "# Persistent Voter Model: pvm.c\n");
 	fprintf(f, "# Data generated by: L. Possamai\n");
@@ -571,7 +632,7 @@ void writeInstructions(FILE* f, int isCompl){
 	} else {
 		fprintf(f, "# Linear Measures: %d\n", (int)MEASURES);
 	}
-    switch(EVOLUTION){
+    switch(mode){
     	case 0:
     		fprintf(f, "# dEta = %.5f\n", DETA);
 			fprintf(f, "# L = %d\n", (int)LSIZE);
@@ -597,14 +658,14 @@ void writeInstructions(FILE* f, int isCompl){
 			break;
     }
     if(DIM == 1){
-        write1DInstructions(f, isCompl);
+        write1DInstructions(f, mode, isCompl);
     } else if(DIM == 2){
-        write2DInstructions(f, isCompl);
+        write2DInstructions(f, mode, isCompl);
     }
 }
 
-void write2DInstructions(FILE* f, int isCompl){
-    switch(MODE){
+void write2DInstructions(FILE* f, int mode,int isCompl){
+    switch(mode){
         case 0:
 			fprintf(f, "#  t nS0 nZ0 nZ\n");
 			break;    
@@ -613,9 +674,9 @@ void write2DInstructions(FILE* f, int isCompl){
 			break;
     }
 }
-void write1DInstructions(FILE* f, int isCompl){
+void write1DInstructions(FILE* f, int mode,int isCompl){
 
-	switch(MODE){
+	switch(mode){
 		case 0:
 			fprintf(f, "#  t N_S0 N_Z0 N_Z lastZ0\n");
 			break;
@@ -626,5 +687,7 @@ void write1DInstructions(FILE* f, int isCompl){
 			    fprintf(f, "#  t nZ\n");
 			}
 			break;
+		case 3:
+			fprintf(f, "#  t step\n");
 	}
 }
