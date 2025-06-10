@@ -1,4 +1,5 @@
 #include <lputil.h>
+#include <lpfhelper.h>
 #include <math.h>
 
 /*****************LPLattice******************
@@ -30,7 +31,7 @@ typedef struct {
     Neighbours* neighbours;     // neighbours matrix
 } SquareLattice;
 
-
+FILE *fileSaving;
 
 void initiateSquareLattice(SquareLattice*, int, int, int);
 void initiateNeighbours(Neighbours*, int, int);
@@ -41,7 +42,7 @@ int unionFind(int*, int, int);
 int getInterfacialLengthWith(int*, SquareLattice*, int, int);
 int getInterfacialLength(int*, SquareLattice*, int);
 void clusterSizeInfo(int*, int*, int*, int*, int*, SquareLattice*);
-
+void plotMatrix(int*, SquareLattice*);
 
 
 void initiateSquareLattice(SquareLattice *l, int dimension, int L, int B){
@@ -256,6 +257,28 @@ void clusterSizeInfo(int *label, int *sizes, int *nClusters, int *biggestCluster
     	*secondBiggestClusterLabel = *biggestClusterLabel;
     }
     
+}
+
+void plotMatrix(int* s, SquareLattice* lattice){
+	if(fileSaving == NULL){
+		fileSaving = safeOpen("matrix_print", ".dat");	
+	}
+	int lsize = lattice->L;
+	int nsize = lattice->size;
+	if(lattice->dimension == 1){
+			for(int i = 0; i < nsize; i++){
+				fprintf(fileSaving, "%d ", s[i]);
+			}
+			fprintf(fileSaving, "\n");
+		
+	} else if(lattice->dimension == 2){
+		for(int i = 0; i < lsize; i++){
+			for(int j = 0; j < lsize; j++){
+				fprintf(fileSaving, "%d ", s[i * lsize + j]);
+			}
+			fprintf(fileSaving, "\n");
+		}
+	}
 }
 
 
