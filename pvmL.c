@@ -1,5 +1,5 @@
 #include <lplattice.h>
-#include <lpfhelper.h>
+//#include <lpfhelper.h>
 #include <ploting.h>
 #include <string.h>
 
@@ -25,23 +25,25 @@ float correlationTime(float);
 float timeForWStat(float);
 void evolveSystemTo(double);
 void printAll(void);
-void openFile(FILE*, char*);
+void openFile(FILE**, char*);
 void w1DBorders(int*, int*);
 void writeInstructions(FILE*, int, int);
 void write2DInstructions(FILE*, int, int);
 void write1DInstructions(FILE*, int, int);
-
+void plotSMatrix(void);
+void nextReinforcementEvolution(void);
+double meanEtaOfInterval(int, int);
 #define SEED                0 // 0: random
 
 //==================Lattice Config.==================//
-#define LSIZE               128
+#define LSIZE               150
 #define DIM                 1
 
 //====================Generic.Evolution================//
-#define DETA                1e-3
+#define DETA                1e-2
 
 //==================Temp. Evolution==================//
-#define TMAX                1e7
+#define TMAX                1e5
 #define TMIN                1e0  // cant be 0 for scale log
 
 //==================Length. Evolution================//
@@ -60,15 +62,16 @@ void write1DInstructions(FILE*, int, int);
 
 //===============Measures Configuration==============//
 
-#define MEASURES            1e6         // Number of evolution tics
-#define LOOPS               1e1         // Number of loops(only valid for non temporal evolutions)
+#define MEASURES            30         // Number of evolution tics
+#define LOOPS               1e5        // Number of loops(only valid for non temporal evolutions)
 #define SCALE               1           // 0: Linear
                                         // 1: LOG
-#define MODE                0           // 0: Number of zealots
+#define MODE                9           // 0: Number of zealots
                                         // 1: cluster
-#define EVOLUTION           4           // 0: Temporal
-                                        // 2: Length Reinforcement
-                                        // 2: Spatial
+#define EVOLUTION           9           // 0: Temporal
+										// 1: dEta
+                                        // 2: L 		
+                                        // 3: Invert
 
 //=================Boundry Condition=================//
 #define FIXED_BORDERS       1
@@ -86,7 +89,7 @@ SquareLattice lattice;
 unsigned int seed;
 FILE *fp1, *fCompl;
 
-double *eta, dEta;
+double *eta, *post_eta, dEta;
 double timeT;
 // always use s and z to measures;
 int *s, *post_s, *z, *post_z;
@@ -99,7 +102,9 @@ int *s, *post_s, *z, *post_z;
 // locMobile its a matrix of mobile matrix agents index
 // locMobile[i] = index of agent i in mobile matrix
 int mobileCount, *mobile, *locMobile;
-float genMeasure;
+
+int nZ = 0, nS1 = 0, nZ1 = 0, nClean = 0;
+double gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
 
 //
 
@@ -112,11 +117,7 @@ int main(){
 }
 
 void initiate(void){
-	if(EVOLUTION > 2){
-		if(DIM == 1){
-			inversionTime1D();
-		}	
-	}
+
     switch(EVOLUTION){
         case 0: //temporalEvolution
             temporalEvolution();
@@ -128,6 +129,12 @@ void initiate(void){
         case 2:
             lengthEvolution();
             break;
+        case 3:
+        	if(DIM == 1) inversionTime1D();
+        	break;
+        case 9:
+        	if(DIM == 1) nextReinforcementEvolution();
+        	break;
     }
 }
 
@@ -142,6 +149,7 @@ void mergeOldValues(void){
     for(int i = 0; i < N; i++){
         s[i] = post_s[i];
         z[i] = post_z[i];
+        eta[i] = post_eta[i];
     }
 
     return;
@@ -155,6 +163,7 @@ void memoryAllocation(void){
     mobile = safeMAlloc(N * sizeof(int));
     locMobile = safeMAlloc(N * sizeof(int));
     eta = safeMAlloc(N * sizeof(double));
+    post_eta = safeMAlloc(N * sizeof(double));
 
 }
 
@@ -164,14 +173,14 @@ void buildInitialConfiguration(void){
             for(int i = 0; i < N; i++){
                 post_s[i] = randomInt(2);
                 post_z[i] = 1;
-                eta[i] = 1.0;
+                post_eta[i] = 1.0;
             }
             break;
         case 1:
             for(int i = 0; i < N; i++){
                 post_s[i] = i < (N / 2) ? 0 : 1;
                 post_z[i] = 1;
-                eta[i] = 1.0;
+                post_eta[i] = 1.0;
             }
             break;
         case 2:
@@ -182,7 +191,7 @@ void buildInitialConfiguration(void){
 
                 post_s[i] = distance <= (float) lattice.L / 4.0 ? 1 : 0;
                 post_z[i] = 1;
-                eta[i] = 1.0;
+                post_eta[i] = 1.0;
             }
             break;
 
@@ -208,6 +217,7 @@ void buildInitialMobileMatrix(void){
 
 
 void printAll(){
+	return;
     for(int i = 0; i < N; i++){
         printf("%d ", s[i] + 2 * z[i]);
         if(DIM == 2 && i % LSIZE == LSIZE - 1) printf("\n");
@@ -219,7 +229,7 @@ void printAll(){
 
 
 void temporalEvolution(void){
-    openFile(fp1, "temporal");
+    openFile(&fp1, "temporal");
     writeInstructions(fp1, 0, 0);
 	float *time_arr = safeMAlloc(MEASURES * sizeof(float));
 	if(SCALE){
@@ -244,7 +254,7 @@ void temporalEvolution(void){
 }
 
 void lengthEvolution(void){
-	openFile(fCompl, "length_MEAN");
+	openFile(&fCompl, "length_MEAN");
 	writeInstructions(fCompl, MODE, 1);
 	float *lengthArr = safeMAlloc((int)MEASURES * sizeof(float));
 	if(SCALE){
@@ -260,7 +270,7 @@ void lengthEvolution(void){
 		
 		initiateSquareLattice(&lattice, DIM, length, B);
 		N = (int)pow(length, DIM);
-  		openFile(fp1, "length");
+  		openFile(&fp1, "length");
 		writeInstructions(fp1, MODE, 0);
   		//printf("S %d %d %d\n", length, lattice.L, N);
 		setup();
@@ -270,33 +280,35 @@ void lengthEvolution(void){
 		
 		double nextTime = timeForWStat(dEta);
 		evolveSystemTo(nextTime);
+		gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
 		for(int l = 0; l < (int)LOOPS; l++){
 		    nextTime += correlationTime(dEta);
 		    evolveSystemTo(nextTime);
 		    takeMeasures(nextTime);
 		}
-		genMeasure = 0;
 		fclose(fp1);
-		fprintf(fCompl, "%.5f %.5f\n", dEta, genMeasure / LOOPS);
-		fflush(fCompl);
+		fprintf(fCompl, "%.5f %.5f %.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS, gen2 / (double)LOOPS, gen3 / (double)LOOPS);
+        fflush(fCompl);
   	}
   	free(lengthArr);
 }
 
 void reinforcementEvolution(void){
-	openFile(fCompl, "reinforcement_MEAN");
+
+	openFile(&fCompl, "reinforcement_MEAN");
+	
 	writeInstructions(fCompl, MODE, 1);
+
     float *deltaEtaArr = safeMAlloc((int)MEASURES * sizeof(float));
     if(SCALE){
 		    geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
     } else {
 		    linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
 	  }
-
     for(int i = 0; i < (int)MEASURES; i++){
-        openFile(fp1, "reinforcement");
+        openFile(&fp1, "reinforcement");
 		writeInstructions(fp1, MODE, 0);
-        genMeasure = 0;
+       	gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
         timeT = 0;
         dEta = deltaEtaArr[i];
         buildInitialConfiguration();
@@ -310,12 +322,82 @@ void reinforcementEvolution(void){
             takeMeasures(nextTime);
         }
         fclose(fp1);
-        fprintf(fCompl, "%.5f %.5f\n", dEta, genMeasure / LOOPS);
+        fprintf(fCompl, "%.5f %.5f %.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS, gen2 / (double)LOOPS, gen3 / (double)LOOPS);
         fflush(fCompl);
     }
     fclose(fCompl);
     free(deltaEtaArr);
 }
+
+
+void nextReinforcementEvolution(void){
+
+	openFile(&fCompl, "eta_MEAN");
+	
+	writeInstructions(fCompl, MODE, 1);
+
+    float *deltaEtaArr = safeMAlloc((int)MEASURES * sizeof(float));
+    if(SCALE){
+		    geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
+    } else {
+		    linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
+	  }
+    for(int i = 0; i < (int)MEASURES; i++){
+
+       	gen0 = 0, gen1 = 0, gen2 = 0;
+        timeT = 0;
+        dEta = deltaEtaArr[i];
+        openFile(&fp1, "eta0");
+		writeInstructions(fp1, MODE, 0);
+        buildInitialConfiguration();
+
+        double nextTime = timeForWStat(dEta);
+        evolveSystemTo(nextTime);
+		
+		int b1, b2, b1Last, b2Last;
+		w1DBorders(&b1, &b2);
+		b1Last = b1; b2Last = b2;
+		int db1, db2;		
+		
+		int l = 0;
+		double eta0, m0;
+		while(l < (int)LOOPS){
+			nextTime = timeT + 1. / (double) mobileCount;
+			evolveSystemTo((double)nextTime);
+			w1DBorders(&b1, &b2);
+			
+			db1 = b1 - b1Last;
+			db2 = b2Last - b2;
+			if(db1 > 0){
+				l++;
+				eta0 = eta[b1 + 1];
+				m0 = dEta / (1 - eta0)
+				gen0 += eta0;
+				gen1 += m0;
+				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, m0);
+            	fflush(fp1);
+			}
+			if(db2 > 0) {
+				l++;
+				eta0 = eta[b2 - 1];
+				m0 = dEta / (1 - eta0)
+				gen0 += eta0;
+				gen1 += m0;
+				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, m0);
+            	fflush(fp1);
+			}
+			
+			b1Last = b1; b2Last = b2;
+			
+		}
+        fclose(fp1);
+        fprintf(fCompl, "%.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS);
+        fflush(fCompl);
+    }
+    fclose(fCompl);
+    free(deltaEtaArr);
+}
+
 
 float timeForWStat(float dEta){
     return 1.0e2 / dEta;
@@ -337,11 +419,24 @@ void evolveSystemTo(double nextTime){
     }
 }
 
+double meanEtaOfInterval(int startInclusive, int endExclusive){
+	double sum = 0, n = (double)(endExclusive - startInclusive);
+	for(int i = startInclusive; i < endExclusive; i++){
+		if(s[i] == s[startInclusive]) {
+			sum += eta[i];
+		} else {
+			n--;
+		}
+		
+	}
+	return (double)sum / n;
+}
+
 void inversionTime1D(){
 	dEta = (double)DETA;
 	char a[100] = "";
 	sprintf(a, "step_time_dEtae%d", (int)log10(dEta));
-	openFile(fp1, a);
+	openFile(&fp1, a);
 	writeInstructions(fp1, 3, 0);
 	timeT = 0.0;
 	double nTime, lastTime;
@@ -355,7 +450,10 @@ void inversionTime1D(){
 		b1 = b01; b1Last = b1;
 		b2 = b02; b2Last = b2;
 		int d1 = b1 - b1Last, d2 = b2 - b2Last;
-		while(1){
+		double invTime1 = 0, invTime2 = 0;
+		int step1 = 0, step2 = 0;
+		int f1 = 1, f2 = 1;
+		while(f1 || f2){
 			nTime = timeT + 1. / (double) mobileCount;
 			evolveSystemTo((double)nTime);
 			w1DBorders(&b1, &b2);
@@ -363,16 +461,18 @@ void inversionTime1D(){
 			d1 = b1 - b1Last;
 			d2 = b2 - b2Last;
 			if(d1 < 0){
-				fprintf(fp1, "%.2f %d\n", timeT - lastTime, b1 - b01 - d1);
-				fflush(fp1);
-				break;
-			} else if(d2 < 0) {
-				fprintf(fp1, "%.2f %d\n", timeT - lastTime, b2 - b02 - d2);
-				fflush(fp1);
-				break;
+				invTime1 = timeT - lastTime;
+				step1 = b1 - b01 - d1;
+				f1 = 0;
+			}
+			if(d2 < 0) {
+				invTime2 = timeT - lastTime;
+				step2 = b2 - b02 - d2;
+				f2 = 0;
 			}
 			b1Last = b1; b2Last = b2;
 		}
+		fprintf(fp1, "%.2f %d %.2f %d %.2f %.2f\n", invTime1, step1, invTime2, step2, (float)(invTime1 + invTime2)/2.0, (float)((step1 + step2)/2.0));
 		evolveSystemTo(timeT + (double)correlationTime(dEta));
 	}
 	fclose(fp1);
@@ -390,7 +490,7 @@ void w1DBorders(int *b1, int *b2){
 		}
 		int j = i2 - i;
 		if(f2){
-			if(s[j] == s[i2]){
+			if(s[j] == s[i2] && z[j]){
 				*b2 = j;
 			} else {
 				f2 = 0;
@@ -403,39 +503,29 @@ void w1DBorders(int *b1, int *b2){
 void take1DMeasures(double nextTime){
     switch(MODE){
         case 0:{
-            int num_z = 0;
-            int num_s1 = 0;
-            int num_z1 = 0;
-            int lastZ0 = 0, foundS1 = 0;
+        	nZ = 0; nS1 = 0; nZ1 = 0; nClean = 0;
+            int lastZ0 = 0, lastZ1 = LSIZE - 1;
             for(int i = 0; i < N; i++){
-                num_s1 += s[i];
-                num_z1 += s[i] * z[i];
-                num_z  += z[i];
-            	if(s[i] == s[0]){ //
-            	    if(z[i] && !foundS1){
-            	        lastZ0 = i;
-            	    }
-            	} else {
-            	    foundS1 = 1;
+                nS1 += s[i];
+                nZ1 += s[i] * z[i];
+                nZ  += z[i];
+            	if(z[i] && s[i] == s[0]){ //
+            	    lastZ0 = i;
+            	}
+            	int j = (int)LSIZE - i - 1;
+            	if(z[j] && s[j] == s[(int)LSIZE - 1]){
+            	    lastZ1 = j;
             	}
 
             }
-            fprintf(fp1,"%.2f %d %d %d %d\n", nextTime, num_s1, num_z1, num_z, lastZ0);
+            nClean = abs(lastZ1 - lastZ0) - 1;
+            gen0 += nS1; gen1 += nZ1;
+            gen2 += nZ; gen3 += nClean;
+            fprintf(fp1,"%.2f %d %d %d %d\n", nextTime, nS1, nZ1, nZ, nClean);
 
             break;
         }
-        case 1:{
-            int nz = 0;
-            for(int i = 0; i < N; i++){
-                nz += z[i];
-
-            }
-            genMeasure += nz;
-            fprintf(fp1,"%.2f %d\n", nextTime, nz);
-            break;
-
-
-        }
+        
     }
 
 }
@@ -443,13 +533,15 @@ void take2DMeasures(double nextTime){
 	if(N <= 1e2 && PLOT) printAll(); 
     switch(MODE){
 		case 0:
-            int num_z = 0, num_s1 = 0, num_z1 = 0;
+			nZ = 0; nS1 = 0; nZ1 = 0;
             for(int i = 0; i < N; i++){
-                num_s1 += s[i];
-                num_z  += z[i];
-                num_z1 += s[i] * z[i];
+                nS1 += s[i];
+                nZ  += z[i];
+                nZ1 += s[i] * z[i];
             }
-            fprintf(fp1,"%.2f %d %d %d\n", nextTime, num_s1, num_z1, num_z);
+            gen0 += nS1; gen1 += nZ1;
+            gen2 += nZ; 
+            fprintf(fp1,"%.2f %d %d %d\n", nextTime, nS1, nZ1, nZ);
             break;
         case 1: //clusters length
         	
@@ -483,19 +575,32 @@ void take2DMeasures(double nextTime){
     }
 }
 
+
+
 void takeMeasures(double nextTime){
+	
     if(DIM == 1){
         take1DMeasures(nextTime);
     } else {
         take2DMeasures(nextTime);
     }
     fflush(fp1);
+    if(PLOT) plotSMatrix();
 }
 
+void plotSMatrix(){
+	int* tempS = safeMAlloc(N * sizeof(int));
+	for(int i = 0; i < N; i++){
+		tempS[i] = s[i] + 2 * z[i];
+	}
+	plotMatrix(tempS, &lattice);
+	free(tempS);
+}
 
 void clear(void){
     free(s); free(post_s);
     free(z); free(post_z);
+    free(eta); free(post_eta);
     free(mobile); free(locMobile);
     clearSquareLattice(&lattice);
 }
@@ -542,18 +647,18 @@ void singleInteraction(void){
     int reinforcementInteraction = post_s[pPos] == post_s[vPos];
 
     if(reinforcementInteraction){
-        eta[pPos] += dEta;
-        if(eta[pPos] >= 1.){
+        post_eta[pPos] += dEta;
+        if(post_eta[pPos] >= 1.){
             post_z[pPos] = 1;
             changedState = 1;
         }
     } else {
         if(post_z[pPos] == 1){
             post_z[pPos] = 0;
-            eta[pPos] = 0.0;
+            post_eta[pPos] = 0.0;
         } else {
             post_s[pPos] = post_s[vPos];
-            eta[pPos] = 0.0;
+            post_eta[pPos] = 0.0;
             changedState = 1;
         }
     }
@@ -612,21 +717,21 @@ void locMatrixUpdate(int s1, int s2, int *mat, int *locMat){
 
 }
 
-void openFile(FILE* f, char *prefix){
+void openFile(FILE** f, char *prefix){
     seed = setupRandom(SEED);
     char name[100];
     sprintf(name, "data_pvm_%s", prefix);
-    fp1 = safeSeedOpen(name, ".dat", &seed, SEED != 0);
-    fflush(fp1);
+    *f = safeSeedOpen(name, ".dat", &seed, SEED != 0);
+    fflush(*f);
 
 }
 
 void writeInstructions(FILE* f, int mode, int isCompl){
-
 	fprintf(f, "# Persistent Voter Model: pvm.c\n");
 	fprintf(f, "# Data generated by: L. Possamai\n");
 	fprintf(f, "# Seed: %d\n", seed);
 	fprintf(f, "# Dimension: %d\n", DIM);
+	
 	if(SCALE){
 	    fprintf(f, "# Log Measures: %d\n", (int)MEASURES);
 	} else {
@@ -656,6 +761,15 @@ void writeInstructions(FILE* f, int mode, int isCompl){
 				fprintf(f, "# L: %d\n", (int)lattice.L);
 			}
 			break;
+			case 9:
+				fprintf(f, "# L = %d\n", (int)LSIZE);
+				if(isCompl){
+					fprintf(f, "# loops: %d\n", (int)LOOPS);
+					fprintf(f, "# dEta: [%.5f, %.5f]\n", DETAMIN, DETAMAX);
+				} else {
+					fprintf(f, "# dEta: %.5f\n", (double)dEta);
+				}
+				break;
     }
     if(DIM == 1){
         write1DInstructions(f, mode, isCompl);
@@ -678,16 +792,21 @@ void write1DInstructions(FILE* f, int mode,int isCompl){
 
 	switch(mode){
 		case 0:
-			fprintf(f, "#  t N_S0 N_Z0 N_Z lastZ0\n");
+			if(isCompl){
+		    	fprintf(f, "#  dEta N_S0 N_Z0 N_Z N_free\n");
+			} else {
+				fprintf(f, "#  t N_S0 N_Z0 N_Z N_free\n");
+			}
 			break;
 		case 1:
-		    if(isCompl){
-			    fprintf(f, "#  t <nZ>\n");
-			} else {
-			    fprintf(f, "#  t nZ\n");
-			}
 			break;
 		case 3:
 			fprintf(f, "#  t step\n");
+		case 9:
+			if(isCompl){
+		    	fprintf(f, "#  dEta <eta0>\n");
+			} else {
+				fprintf(f, "#  t eta0\n");
+			}
 	}
 }
