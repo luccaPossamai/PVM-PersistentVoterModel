@@ -32,7 +32,7 @@ void write2DInstructions(FILE*, int, int);
 void write1DInstructions(FILE*, int, int);
 void plotSMatrix(void);
 void nextReinforcementEvolution(void);
-double meanEtaOfInterval(int, int);
+double velocityOfBorder(int, int);
 #define SEED                0 // 0: random
 
 //==================Lattice Config.==================//
@@ -63,7 +63,7 @@ double meanEtaOfInterval(int, int);
 //===============Measures Configuration==============//
 
 #define MEASURES            30         // Number of evolution tics
-#define LOOPS               1e5        // Number of loops(only valid for non temporal evolutions)
+#define LOOPS               1e4        // Number of loops(only valid for non temporal evolutions)
 #define SCALE               1           // 0: Linear
                                         // 1: LOG
 #define MODE                9           // 0: Number of zealots
@@ -149,7 +149,7 @@ void mergeOldValues(void){
     for(int i = 0; i < N; i++){
         s[i] = post_s[i];
         z[i] = post_z[i];
-        eta[i] = post_eta[i];
+        eta[i] = (double)post_eta[i];
     }
 
     return;
@@ -360,7 +360,7 @@ void nextReinforcementEvolution(void){
 		int db1, db2;		
 		
 		int l = 0;
-		double eta0, m0;
+		double eta0, vw;
 		while(l < (int)LOOPS){
 			nextTime = timeT + 1. / (double) mobileCount;
 			evolveSystemTo((double)nextTime);
@@ -371,19 +371,19 @@ void nextReinforcementEvolution(void){
 			if(db1 > 0){
 				l++;
 				eta0 = eta[b1 + 1];
-				m0 = dEta / (1 - eta0)
+				vw = velocityOfBorder(b1, +1);
 				gen0 += eta0;
-				gen1 += m0;
-				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, m0);
+				gen1 += vw;
+				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, vw);
             	fflush(fp1);
 			}
 			if(db2 > 0) {
 				l++;
 				eta0 = eta[b2 - 1];
-				m0 = dEta / (1 - eta0)
+				vw = velocityOfBorder(b2, -1);
 				gen0 += eta0;
-				gen1 += m0;
-				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, m0);
+				gen1 += vw;
+				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, vw);
             	fflush(fp1);
 			}
 			
@@ -419,17 +419,36 @@ void evolveSystemTo(double nextTime){
     }
 }
 
-double meanEtaOfInterval(int startInclusive, int endExclusive){
-	double sum = 0, n = (double)(endExclusive - startInclusive);
-	for(int i = startInclusive; i < endExclusive; i++){
-		if(s[i] == s[startInclusive]) {
-			sum += eta[i];
+//gets the next non zealot 
+double velocityOfBorder(int border, int ds){
+	int i = border + ds;
+	if(s[border] == s[i]){
+		int m = (int)round(eta[i] / dEta);
+		int tau = (int)ceil(1.0 / dEta);
+		if(z[i] || m == tau) {
+			return velocityOfBorder(i, ds);
 		} else {
-			n--;
+			return (1.0 / (double)(tau - m));
 		}
+	}
+	return dEta / (1.0 + dEta);
+	/*
+	while(1){
+		eta0 = 0;
+		i += ds;
+		if(i < LSIZE && i >= 0){
+			if(s[i] == s[border]){
+				eta0 = eta[i];
+				if(z[i]) continue;	
+			}
+		}
+		break;
 		
 	}
-	return (double)sum / n;
+	double v = dEta / (double)(1.-eta0);
+	
+	return v;
+	*/
 }
 
 void inversionTime1D(){
@@ -647,8 +666,8 @@ void singleInteraction(void){
     int reinforcementInteraction = post_s[pPos] == post_s[vPos];
 
     if(reinforcementInteraction){
-        post_eta[pPos] += dEta;
-        if(post_eta[pPos] >= 1.){
+        post_eta[pPos] += (double)dEta;
+        if(post_eta[pPos] >= 1 - 1e-5){
             post_z[pPos] = 1;
             changedState = 1;
         }
