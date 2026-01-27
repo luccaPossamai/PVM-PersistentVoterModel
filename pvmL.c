@@ -1,7 +1,5 @@
 #include <lplattice.h>
-//#include <lpfhelper.h>
-#include <ploting.h>
-#include <string.h>
+#include <stdio.h>
 
 void setup(void);
 void mergeOldValues(void);
@@ -21,8 +19,8 @@ void temporalEvolution(void);
 void reinforcementEvolution(void);
 void lengthEvolution(void);
 void inversionTime1D(void);
-float correlationTime(float);
-float timeForWStat(float);
+double correlationTime(double);
+double timeForWStat(double);
 void evolveSystemTo(double);
 void printAll(void);
 void openFile(FILE**, char*);
@@ -31,20 +29,23 @@ void writeInstructions(FILE*, int, int);
 void write2DInstructions(FILE*, int, int);
 void write1DInstructions(FILE*, int, int);
 void plotSMatrix(void);
-void nextReinforcementEvolution(void);
-double velocityOfBorder(int, int);
-#define SEED                0 // 0: random
+void onBorderWalkEvolution(void);
+double etaOfBiased(int, int);
+void exportBaseSpinMatrix(void);
+void attainConsensus(void);
+
+#define SEED                0//123456789// 0: random
 
 //==================Lattice Config.==================//
-#define LSIZE               150
-#define DIM                 1
+#define LSIZE               128
+#define DIM                 2
 
 //====================Generic.Evolution================//
-#define DETA                1e-2
+#define DETA                1e-3
 
 //==================Temp. Evolution==================//
-#define TMAX                1e5
 #define TMIN                1e0  // cant be 0 for scale log
+#define TMAX                1e4
 
 //==================Length. Evolution================//
 #define LMAX                64	
@@ -52,7 +53,7 @@ double velocityOfBorder(int, int);
 
 //==================DEta. Evolution==================//
 #define DETAMIN             1e-4
-#define DETAMAX             1e0
+#define DETAMAX             1e-2
 
 //===============Initial Configuration===============//
 #define C                   1           // 0: Random
@@ -62,17 +63,17 @@ double velocityOfBorder(int, int);
 
 //===============Measures Configuration==============//
 
-#define MEASURES            30         // Number of evolution tics
-#define LOOPS               1e4        // Number of loops(only valid for non temporal evolutions)
+#define MEASURES            60         // Number of evolution tics
+#define LOOPS               1e3       // Number of loops(only valid for non temporal evolutions)
 #define SCALE               1           // 0: Linear
                                         // 1: LOG
-#define MODE                9           // 0: Number of zealots
+#define MODE                0           // 0: Number of zealots
                                         // 1: cluster
-#define EVOLUTION           9           // 0: Temporal
-										// 1: dEta
-                                        // 2: L 		
-                                        // 3: Invert
-
+#define EVOLUTION           0          // 0: temporalEvolution
+										// 1: reinforcementEvolution
+                                        // 2: lengthEvolution 		
+                                        // 3: inversionTime1D
+                                        // 4: onBorderWalkEvolution
 //=================Boundry Condition=================//
 #define FIXED_BORDERS       1
 
@@ -81,13 +82,13 @@ double velocityOfBorder(int, int);
 											//1 -> dobrushin vertical(periodic horizontally)
 											//2 -> dobrushin horizontal(periodic vertically)
 											//3 -> square
-#define PLOT                0
+#define EXPORT_MATRIX       1
 
 
-int N = pow(LSIZE, DIM);
+int N;
 SquareLattice lattice;
 unsigned int seed;
-FILE *fp1, *fCompl;
+FILE *fp1, *fCompl, *fMatrix;
 
 double *eta, *post_eta, dEta;
 double timeT;
@@ -109,10 +110,14 @@ double gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
 //
 
 int main(){
+    N = pow(LSIZE, DIM);
     initiateSquareLattice(&lattice, DIM, LSIZE, B);
+
+    if(EXPORT_MATRIX) fMatrix = fopen("matrix.dat", "w");
     setup();
     initiate();
     clear();
+    if(EXPORT_MATRIX) fclose(fMatrix);
     return 0;
 }
 
@@ -130,11 +135,14 @@ void initiate(void){
             lengthEvolution();
             break;
         case 3:
-        	if(DIM == 1) inversionTime1D();
+        	inversionTime1D();
         	break;
-        case 9:
-        	if(DIM == 1) nextReinforcementEvolution();
+        case 4:
+        	onBorderWalkEvolution();
         	break;
+        case 5:
+            attainConsensus();
+            break;
     }
 }
 
@@ -164,7 +172,6 @@ void memoryAllocation(void){
     locMobile = safeMAlloc(N * sizeof(int));
     eta = safeMAlloc(N * sizeof(double));
     post_eta = safeMAlloc(N * sizeof(double));
-
 }
 
 void buildInitialConfiguration(void){
@@ -183,21 +190,22 @@ void buildInitialConfiguration(void){
                 post_eta[i] = 1.0;
             }
             break;
-        case 2:
-        	float x0 = LSIZE / 2.0, y0 = x0;
+        case 2: {
+            if(DIM == 1) printf("\n Initial configuration not valid for given dimension \n");
+            int i0 = LSIZE % 2 == 0 ? (N + LSIZE) / 2 : N / 2;
+        	int x0 = i0%LSIZE, y0 = i0/LSIZE;
             for(int i = 0; i < N; i++){
                 int x = i % LSIZE, y = i / LSIZE;
                 float distance = sqrt(pow(x - x0, 2) + pow(y - y0, 2));
-
-                post_s[i] = distance <= (float) lattice.L / 4.0 ? 1 : 0;
+                post_s[i] = distance <= (float) lattice.L / 4.0f ? 0 : 1;
                 post_z[i] = 1;
                 post_eta[i] = 1.0;
             }
             break;
+        }
 
     }
     mergeOldValues();
-    if(PLOT) printAll();
     buildInitialMobileMatrix();
 
 }
@@ -216,16 +224,19 @@ void buildInitialMobileMatrix(void){
 }
 
 
-void printAll(){
-	return;
-    for(int i = 0; i < N; i++){
-        printf("%d ", s[i] + 2 * z[i]);
-        if(DIM == 2 && i % LSIZE == LSIZE - 1) printf("\n");
+void exportMatrix(int *s, int sizeN){
+    for(int i = 0; i < sizeN; i++){
+        fprintf(fMatrix, "%d ", s[i]);
     }
-
-    printf("\n\n");
+    fprintf(fMatrix, "\n");
 }
 
+void exportBaseSpinMatrix(){
+     int *a = safeMAlloc(N * sizeof(int));
+            for(int i = 0; i < N; i++) { a[i] = s[i] + 2 * z[i];}
+            exportMatrix(a, N);
+            free(a);
+}
 
 
 void temporalEvolution(void){
@@ -243,19 +254,57 @@ void temporalEvolution(void){
 	double nextTime = 0.0;
     buildInitialConfiguration();
     dEta = (double)DETA;
-    
+    fprintf(fp1, "# dEta: %.5f\n", dEta);
+    fprintf(fp1, "# LSIZE: %d\n", (int)LSIZE);
+    fprintf(fp1, "# t nS0 nZ0 nZ\n");
+
+    if(EXPORT_MATRIX) exportBaseSpinMatrix();
     for(int i = 0; i < MEASURES; i++){
     	nextTime = (double)time_arr[i];
         evolveSystemTo(nextTime);
     	takeMeasures(nextTime);
-    	//printAll();
     }
     free(time_arr);
+}
+
+void attainConsensus(void){
+    openFile(&fp1, "consensus_MEAN");
+    writeInstructions(fp1, 0, 0);
+    fprintf(fp1, "# dEta tau\n");
+    float *dEta_arr = safeMAlloc(MEASURES * sizeof(float));
+    if(SCALE){
+        geomProgression(dEta_arr, (float)DETAMIN, (float)DETAMAX, MEASURES);
+    } else {
+        linearProgression(dEta_arr, (float)DETAMIN, (float)DETAMAX, MEASURES);
+    }
+    for(int i = 0; i < MEASURES; i++){
+        dEta = (double)dEta_arr[i];
+        int l = 0;
+        float tau = 0;
+        while(l < LOOPS){
+
+            buildInitialConfiguration();
+            timeT = 0.0;
+            int mag = sumIntArray(s, N);
+            while(mag != 0 && mag != N) {
+                evolveSystemTo(timeT + (1.0/mobileCount));
+                mag = sumIntArray(s, N);
+            }   
+            tau += timeT;
+            l++;
+        }
+        fprintf(fp1, "%.5f %.2f\n", dEta, tau / (float)LOOPS);
+    }
+    fclose(fp1);
+    free(dEta_arr);
+
+
 }
 
 void lengthEvolution(void){
 	openFile(&fCompl, "length_MEAN");
 	writeInstructions(fCompl, MODE, 1);
+  fflush(fCompl);
 	float *lengthArr = safeMAlloc((int)MEASURES * sizeof(float));
 	if(SCALE){
 		geomProgression(lengthArr, (float)LMIN, (float)LMAX, (int)MEASURES);
@@ -294,117 +343,137 @@ void lengthEvolution(void){
 }
 
 void reinforcementEvolution(void){
-
-	openFile(&fCompl, "reinforcement_MEAN");
-	
-	writeInstructions(fCompl, MODE, 1);
-
-    float *deltaEtaArr = safeMAlloc((int)MEASURES * sizeof(float));
+    
+    openFile(&fp1, "reinforcement_MEAN");
+    writeInstructions(fp1, 0, 0);
+    fprintf(fp1, "# dEta: [%.5f, %.5F]\n", DETAMIN, DETAMAX);
+    fprintf(fp1, "# LSIZE: %d\n", (int)LSIZE);
+    fprintf(fp1, "# dEta nS0 nZ\n");
+    
+        fflush(fp1);
+    float *dEta_arr = safeMAlloc(MEASURES * sizeof(float));
     if(SCALE){
-		    geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
+        geomProgression(dEta_arr, (float)DETAMIN, (float)DETAMAX, MEASURES);
     } else {
-		    linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
-	  }
-    for(int i = 0; i < (int)MEASURES; i++){
-        openFile(&fp1, "reinforcement");
-		writeInstructions(fp1, MODE, 0);
-       	gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
-        timeT = 0;
-        dEta = deltaEtaArr[i];
-        buildInitialConfiguration();
-
-        double nextTime = timeForWStat(dEta);
-        evolveSystemTo(nextTime);
-
-        for(int l = 0; l < (int)LOOPS; l++){
-            nextTime += correlationTime(dEta);
-            evolveSystemTo(nextTime);
-            takeMeasures(nextTime);
-        }
-        fclose(fp1);
-        fprintf(fCompl, "%.5f %.5f %.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS, gen2 / (double)LOOPS, gen3 / (double)LOOPS);
-        fflush(fCompl);
+        linearProgression(dEta_arr, (float)DETAMIN, (float)DETAMAX, MEASURES);
     }
-    fclose(fCompl);
-    free(deltaEtaArr);
+    for(int i = 0; i < MEASURES; i++){
+        dEta = (double)dEta_arr[i];
+        int l = 0;
+    
+        char name[25];
+        sprintf(name, "reinforcement_%0.5f", dEta);
+        openFile(&fCompl, name);
+        writeInstructions(fCompl, 0, 0);
+        fprintf(fCompl, "# dEta: %.5F\n", dEta);
+        fprintf(fCompl, "# LSIZE: %d\n", (int)LSIZE);
+        fprintf(fCompl, "# t nS0 nZ\n");
+        fflush(fCompl);
+        buildInitialConfiguration();
+        timeT = 0.0;
+        evolveSystemTo(timeT + timeForWStat(dEta));
+        int nS0_M = 0, nZ_M = 0;
+        while(l < LOOPS){
+
+            int nS0 = N - sumIntArray(s, N),
+                nZ = sumIntArray(z, N);
+            nS0_M += nS0; nZ_M += nZ;
+            fprintf(fCompl, "%.2f %d %d\n", timeT, nS0, nZ);
+            fflush(fCompl);      
+            evolveSystemTo(timeT + correlationTime(dEta));
+            l++;
+
+        }
+        fprintf(fp1, "%.5f %2.f %.2f\n", dEta, nS0_M / (double)LOOPS, nZ_M / (double) LOOPS);
+        fflush(fp1);
+
+        fclose(fCompl);
+    }
+    fclose(fp1);
+    free(dEta_arr);
+
 }
 
 
-void nextReinforcementEvolution(void){
-
-	openFile(&fCompl, "eta_MEAN");
-	
-	writeInstructions(fCompl, MODE, 1);
-
+void onBorderWalkEvolution(void){
+    if(DIM != 1) {
+        printf("Wrong mode for given dimension!");
+        return;
+    }
     float *deltaEtaArr = safeMAlloc((int)MEASURES * sizeof(float));
     if(SCALE){
-		    geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
+        geomProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
     } else {
-		    linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
-	  }
+        linearProgression(deltaEtaArr, (float)DETAMIN, (float)DETAMAX, (int)MEASURES);
+    }
+    openFile(&fCompl, "on_border_walk_MEAN");
+    writeInstructions(fCompl, 1, 1);
+    fprintf(fCompl, "# dEta eta0 eta1 eta2 W\n");
     for(int i = 0; i < (int)MEASURES; i++){
-
-       	gen0 = 0, gen1 = 0, gen2 = 0;
         timeT = 0;
         dEta = deltaEtaArr[i];
-        openFile(&fp1, "eta0");
-		writeInstructions(fp1, MODE, 0);
+        gen0 = 0.0, gen1 = 0.0, gen2 = 0.0, gen3 = 0.0;
+        openFile(&fp1, "on_border_walk");
+        writeInstructions(fp1, 1, 0);
+        fprintf(fp1, "# eta0 eta1 eta2 W\n");
         buildInitialConfiguration();
-
         double nextTime = timeForWStat(dEta);
         evolveSystemTo(nextTime);
-		
 		int b1, b2, b1Last, b2Last;
-		w1DBorders(&b1, &b2);
+        w1DBorders(&b1, &b2);
 		b1Last = b1; b2Last = b2;
 		int db1, db2;		
-		
 		int l = 0;
-		double eta0, vw;
 		while(l < (int)LOOPS){
 			nextTime = timeT + 1. / (double) mobileCount;
 			evolveSystemTo((double)nextTime);
 			w1DBorders(&b1, &b2);
-			
-			db1 = b1 - b1Last;
+			db1 = b1 - b1Last; // compute the displacement based on last flip
 			db2 = b2Last - b2;
 			if(db1 > 0){
-				l++;
-				eta0 = eta[b1 + 1];
-				vw = velocityOfBorder(b1, +1);
-				gen0 += eta0;
-				gen1 += vw;
-				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, vw);
-            	fflush(fp1);
+                l++;
+                gen0 += etaOfBiased(b1 + 1, b1), gen1 += etaOfBiased(b1 + 2, b1), gen2 += etaOfBiased(b1 + 3, b1), gen3 += abs(b1 - b2);
+                fprintf(fp1, "%.5f %.5f %.5f %d\n", 
+                        etaOfBiased(b1 + 1, b1),
+                        etaOfBiased(b1 + 2, b1),
+                        etaOfBiased(b1 + 3, b1),
+                        abs(b1 - b2));
+                fflush(fp1);
+            }
+            if(db2 > 0) {
+			    l++;
+                gen0 += etaOfBiased(b2 - 1, b2), gen1 += etaOfBiased(b2 - 2, b2), gen2 += etaOfBiased(b2 - 3, b2), gen3 += abs(b1 - b2);
+                fprintf(fp1, "%.5f %.5f %.5f %d\n", 
+                        etaOfBiased(b2 - 1, b2), 
+                        etaOfBiased(b2 - 2, b2), 
+                        etaOfBiased(b2 - 3, b2), 
+                        abs(b1 - b2));
+                fflush(fp1);
 			}
-			if(db2 > 0) {
-				l++;
-				eta0 = eta[b2 - 1];
-				vw = velocityOfBorder(b2, -1);
-				gen0 += eta0;
-				gen1 += vw;
-				fprintf(fp1, "%.5f %.5f %.5f\n", timeT, eta0, vw);
-            	fflush(fp1);
-			}
-			
-			b1Last = b1; b2Last = b2;
-			
-		}
-        fclose(fp1);
-        fprintf(fCompl, "%.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS);
+            b1Last = b1; b2Last = b2;
+        }
+        fprintf(fCompl, "%.5f %.5f %.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS, gen1 / (double)LOOPS, gen2 / (double)LOOPS, gen3 / (double)LOOPS);
         fflush(fCompl);
+        fclose(fp1);
     }
-    fclose(fCompl);
     free(deltaEtaArr);
+    fclose(fCompl);
 }
 
+// 
+double etaOfBiased(int i0, int iBias){
+    if(s[i0] != s[iBias]) return 0.0;
+    return eta[i0];
+}
 
-float timeForWStat(float dEta){
+double timeForWStat(double dEta){
     return 1.0e2 / dEta;
 }
-float correlationTime(float dEta){
-    return 10 / dEta;
+double correlationTime(double dEta){
+    return 1.0e1 / dEta;
 }
+
+
 void evolveSystemTo(double nextTime){
     while(timeT < nextTime){
         if(mobileCount == 0){
@@ -419,40 +488,13 @@ void evolveSystemTo(double nextTime){
     }
 }
 
-//gets the next non zealot 
-double velocityOfBorder(int border, int ds){
-	int i = border + ds;
-	if(s[border] == s[i]){
-		int m = (int)round(eta[i] / dEta);
-		int tau = (int)ceil(1.0 / dEta);
-		if(z[i] || m == tau) {
-			return velocityOfBorder(i, ds);
-		} else {
-			return (1.0 / (double)(tau - m));
-		}
-	}
-	return dEta / (1.0 + dEta);
-	/*
-	while(1){
-		eta0 = 0;
-		i += ds;
-		if(i < LSIZE && i >= 0){
-			if(s[i] == s[border]){
-				eta0 = eta[i];
-				if(z[i]) continue;	
-			}
-		}
-		break;
-		
-	}
-	double v = dEta / (double)(1.-eta0);
-	
-	return v;
-	*/
-}
 
 void inversionTime1D(){
-	dEta = (double)DETA;
+	if(DIM != 1){
+        printf("Wrong mode!\n");
+        return;
+    }
+    dEta = (double)DETA;
 	char a[100] = "";
 	sprintf(a, "step_time_dEtae%d", (int)log10(dEta));
 	openFile(&fp1, a);
@@ -522,7 +564,7 @@ void w1DBorders(int *b1, int *b2){
 void take1DMeasures(double nextTime){
     switch(MODE){
         case 0:{
-        	nZ = 0; nS1 = 0; nZ1 = 0; nClean = 0;
+        	nZ = 0; nS1 = 0; nZ1 = 0;
             int lastZ0 = 0, lastZ1 = LSIZE - 1;
             for(int i = 0; i < N; i++){
                 nS1 += s[i];
@@ -548,8 +590,7 @@ void take1DMeasures(double nextTime){
     }
 
 }
-void take2DMeasures(double nextTime){
-	if(N <= 1e2 && PLOT) printAll(); 
+void take2DMeasures(double nextTime){ 
     switch(MODE){
 		case 0:
 			nZ = 0; nS1 = 0; nZ1 = 0;
@@ -562,9 +603,9 @@ void take2DMeasures(double nextTime){
             gen2 += nZ; 
             fprintf(fp1,"%.2f %d %d %d\n", nextTime, nS1, nZ1, nZ);
             break;
-        case 1: //clusters length
+        case 1: {
         	
-			int *matrix_SZ = safeMAlloc(N * sizeof(int));
+			int *matrix_SZ = safeMAlloc((int)N * sizeof(int));
          	for(int i = 0; i < N; i++){
             	matrix_SZ[i] = s[i] + 2 * z[i];
           	}
@@ -591,6 +632,7 @@ void take2DMeasures(double nextTime){
 		
           free(labS);  free(matrix_SZ); free(sizeS);
           free(labSZ); free(sizeSZ);
+        }
     }
 }
 
@@ -604,16 +646,7 @@ void takeMeasures(double nextTime){
         take2DMeasures(nextTime);
     }
     fflush(fp1);
-    if(PLOT) plotSMatrix();
-}
-
-void plotSMatrix(){
-	int* tempS = safeMAlloc(N * sizeof(int));
-	for(int i = 0; i < N; i++){
-		tempS[i] = s[i] + 2 * z[i];
-	}
-	plotMatrix(tempS, &lattice);
-	free(tempS);
+    if(EXPORT_MATRIX) exportBaseSpinMatrix();
 }
 
 void clear(void){
@@ -622,6 +655,7 @@ void clear(void){
     free(eta); free(post_eta);
     free(mobile); free(locMobile);
     clearSquareLattice(&lattice);
+    
 }
 
 //==================Virtual Environment==================//
@@ -667,7 +701,8 @@ void singleInteraction(void){
 
     if(reinforcementInteraction){
         post_eta[pPos] += (double)dEta;
-        if(post_eta[pPos] >= 1 - 1e-5){
+        if(post_eta[pPos] >= 1.0){
+            post_eta[pPos] = 1.0;
             post_z[pPos] = 1;
             changedState = 1;
         }
@@ -738,7 +773,7 @@ void locMatrixUpdate(int s1, int s2, int *mat, int *locMat){
 
 void openFile(FILE** f, char *prefix){
     seed = setupRandom(SEED);
-    char name[100];
+    char name[120];
     sprintf(name, "data_pvm_%s", prefix);
     *f = safeSeedOpen(name, ".dat", &seed, SEED != 0);
     fflush(*f);
@@ -756,6 +791,7 @@ void writeInstructions(FILE* f, int mode, int isCompl){
 	} else {
 		fprintf(f, "# Linear Measures: %d\n", (int)MEASURES);
 	}
+    return;
     switch(mode){
     	case 0:
     		fprintf(f, "# dEta = %.5f\n", DETA);
@@ -766,7 +802,7 @@ void writeInstructions(FILE* f, int mode, int isCompl){
 			fprintf(f, "# L = %d\n", (int)LSIZE);
 			if(isCompl){
 			    fprintf(f, "# loops: %d\n", (int)LOOPS);
-				fprintf(f, "# dEta: [%.5f, %.5f]\n", DETAMIN, DETAMAX);
+				fprintf(f, "# dEta: [%.5f, %.5f]\n", (double)DETAMIN, (double)DETAMAX);
 			} else {
 				fprintf(f, "# dEta: %.5f\n", (double)dEta);
 			}
@@ -780,11 +816,12 @@ void writeInstructions(FILE* f, int mode, int isCompl){
 				fprintf(f, "# L: %d\n", (int)lattice.L);
 			}
 			break;
+            case 8:
 			case 9:
 				fprintf(f, "# L = %d\n", (int)LSIZE);
 				if(isCompl){
 					fprintf(f, "# loops: %d\n", (int)LOOPS);
-					fprintf(f, "# dEta: [%.5f, %.5f]\n", DETAMIN, DETAMAX);
+					fprintf(f, "# dEta: [%.5f, %.5f]\n", DETAMIN, (double) DETAMAX);
 				} else {
 					fprintf(f, "# dEta: %.5f\n", (double)dEta);
 				}
@@ -821,6 +858,13 @@ void write1DInstructions(FILE* f, int mode,int isCompl){
 			break;
 		case 3:
 			fprintf(f, "#  t step\n");
+        case 8:
+            if(isCompl){
+                fprintf(f, "# dEta <vel>\n");
+            } else {
+                fprintf(f, "# t vel\n");
+            }
+            break;
 		case 9:
 			if(isCompl){
 		    	fprintf(f, "#  dEta <eta0>\n");

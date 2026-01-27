@@ -13,4 +13,4 @@ plot: $(TARGET).c
 	gcc -DFORCE_SEED=123456789 -DPLOT=1 -I$(INCLUDES) -O3 -o run $(TARGET).c -Wall -lm
 	./run | gnuplot
 clean:
-	rm -f $(TARGET)
+	rm -f run
