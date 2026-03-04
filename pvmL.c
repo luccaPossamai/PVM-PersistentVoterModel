@@ -33,8 +33,8 @@ void onBorderWalkEvolution(void);
 double etaOfBiased(int, int);
 void exportBaseSpinMatrix(void);
 void attainConsensus(void);
-void initiateGenerics(void);
-void printGenerics(int);
+void initiateGenerics(int);
+void printGenerics(FILE*, int);
 
 //==================Lattice Config.==================//
 
@@ -47,16 +47,16 @@ void printGenerics(int);
 
 //==================Generic.Evolution================//
 
-#define DETA 1e0
+#define DETA 1e-3
 
 //==================Temp. Evolution==================//
 
 #define TMIN 1e0 // cant be 0 for scale log
 #define TMAX 1e7
 
-//==================Length. Evolution================//
+//==================Length Evolution=================//
 
-#define LMAX 64
+#define LMAX 256
 #define LMIN 8
 
 //==================DEta. Evolution==================//
@@ -86,8 +86,9 @@ void printGenerics(int);
 #define SCALE 1
 
 // 0: Number of zealots
-// 1: cluster
-#define MODE 2
+// 1: Interface Length
+// 2: Instantaneous AR Width
+#define MODE 1
 
 /*
  * 0: temporalEvolution
@@ -96,7 +97,7 @@ void printGenerics(int);
  * 3: inversionTime1D
  * 4: onBorderWalkEvolution
  */
-#define EVOLUTION 1
+#define EVOLUTION 2
 
 //=================Boundry Condition=================//
 #define FIXED_BORDERS 1
@@ -165,13 +166,13 @@ void initiate(void) {
             lengthEvolution();
             break;
         case 3:
-            inversionTime1D();
+            //            inversionTime1D();
             break;
         case 4:
-            onBorderWalkEvolution();
+            //            onBorderWalkEvolution();
             break;
         case 5:
-            attainConsensus();
+            //            attainConsensus();
             break;
     }
 }
@@ -334,15 +335,12 @@ void lengthEvolution(void) {
     }
     dEta = (double)DETA;
     for (int i = 0; i < (int)MEASURES; i++) {
-
         clear();
-        int length = (int)lengthArr[i];
-
+        int length = (int)round(lengthArr[i]);
         initiateSquareLattice(&lattice, DIM, length, B);
         N = (int)pow(length, DIM);
         openFile(&fp1, "length");
         writeInstructions(fp1, MODE, 0);
-        // printf("S %d %d %d\n", length, lattice.L, N);
         setup();
 
         timeT = 0;
@@ -350,17 +348,17 @@ void lengthEvolution(void) {
 
         double nextTime = timeForWStat(dEta);
         evolveSystemTo(nextTime);
-        gen0 = 0, gen1 = 0, gen2 = 0, gen3 = 0;
         for (int l = 0; l < (int)LOOPS; l++) {
             nextTime += correlationTime(dEta);
             evolveSystemTo(nextTime);
             takeMeasures(nextTime);
         }
+        fprintf(fCompl, "%d", length);
+        printGenerics(fCompl, 1);
+
         fclose(fp1);
-        fprintf(fCompl, "%.5f %.5f %.5f %.5f %.5f\n", dEta, gen0 / (double)LOOPS,
-                gen1 / (double)LOOPS, gen2 / (double)LOOPS, gen3 / (double)LOOPS);
-        fflush(fCompl);
     }
+    fclose(fCompl);
     free(lengthArr);
 }
 
@@ -393,7 +391,7 @@ void reinforcementEvolution(void) {
             l++;
         }
         fprintf(fCompl, "%.5f", dEta);
-        printGenerics(1);
+        printGenerics(fCompl, 1);
         fclose(fp1);
     }
     fclose(fCompl);
@@ -464,7 +462,6 @@ void onBorderWalkEvolution(void) {
     fclose(fCompl);
 }
 
-//
 double etaOfBiased(int i0, int iBias) {
     if (s[i0] != s[iBias])
         return 0.0;
@@ -570,6 +567,7 @@ void w1DBorders(int* b1, int* b2) {
 void take1DMeasures(double nextTime) {
     switch (MODE) {
         case 0: {
+            initiateGenerics(4);
             nZ = 0;
             nS1 = 0;
             nZ1 = 0;
@@ -587,10 +585,10 @@ void take1DMeasures(double nextTime) {
                 }
             }
             nClean = abs(lastZ1 - lastZ0) - 1;
-            gen0 += nS1;
-            gen1 += nZ1;
-            gen2 += nZ;
-            gen3 += nClean;
+            generics[0] += nS1;
+            generics[1] += nZ1;
+            generics[2] += nZ;
+            generics[3] += nClean;
             fprintf(fp1, "%.2f %d %d %d %d\n", nextTime, nS1, nZ1, nZ, nClean);
 
             break;
@@ -600,6 +598,7 @@ void take1DMeasures(double nextTime) {
 void take2DMeasures(double nextTime) {
     switch (MODE) {
         case 0:
+            initiateGenerics(3);
             nZ = 0;
             nS1 = 0;
             nZ1 = 0;
@@ -608,20 +607,43 @@ void take2DMeasures(double nextTime) {
                 nZ += z[i];
                 nZ1 += s[i] * z[i];
             }
-            gen0 += nS1;
-            gen1 += nZ1;
-            gen2 += nZ;
+
+            generics[0] += nS1;
+            generics[1] += nZ1;
+            generics[2] += nZ;
             fprintf(fp1, "%.2f %d %d %d\n", nextTime, nS1, nZ1, nZ);
+
             break;
         case 1: {
-
+            initiateGenerics(1);
             int* matrix_SZ = safeMAlloc((int)N * sizeof(int));
             for (int i = 0; i < N; i++) {
                 matrix_SZ[i] = s[i] + 2 * z[i];
             }
 
-            int labCl1SZ, labCl2SZ, nClSZ = 0; // biggestClustersLabels and number of Clusters of S
-            int* labSZ = safeMAlloc(N * sizeof(int));  // H-K label matrix of S;
+            int* labSZ = safeMAlloc(N * sizeof(int)); // H-K label matrix of S;
+            labelCluster(labSZ, matrix_SZ, &lattice);
+
+            int i0 = labSZ[0], i1 = labSZ[N - 1];
+            int length = 0;
+            for (int i = 0; i < N; i++) {
+                int is0 = labSZ[i] == i0, is1 = labSZ[i] == i1;
+                if (is0 || is1) {
+                    for (int j = 0; j < 3; j++) {
+                        int iNeig = lattice.neighbours->matrix[i][j];
+                        if ((is0 && labSZ[iNeig] != i0) || (is1 && labSZ[iNeig] != i1)) {
+                            length++;
+                        }
+                    }
+                }
+            }
+
+            generics[0] += (double)length / 2;
+            fprintf(fp1, "%.2f %.2f\n", nextTime, (double)length / 2.0);
+            fflush(fp1);
+            break;
+            free(labSZ);
+            /*
             int* sizeSZ = safeMAlloc(N * sizeof(int)); // Sizes of clusters;
             labelCluster(labSZ, matrix_SZ, &lattice);
             clusterSizeInfo(labSZ, sizeSZ, &nClSZ, &labCl1SZ, &labCl2SZ, &lattice);
@@ -648,14 +670,11 @@ void take2DMeasures(double nextTime) {
             free(sizeS);
             free(labSZ);
             free(sizeSZ);
+            */
         }
         case 2: {
-            if (generics == NULL) {
-                genericsLength = 6;
-                initiateGenerics();
-            }
-            double MZ0 = 0, MZ1 = 0, MS0 = 0;
-            double M2Z0 = 0, M2Z1 = 0, M2S0 = 0;
+            initiateGenerics(6);
+            double MZ0 = 0, MZ1 = 0, MS0 = 0, M2Z0 = 0, M2Z1 = 0, M2S0 = 0;
             for (int x = 1; x < LSIZE - 1; x++) {
                 int lastZ0 = -1, lastZ1 = -1, lastS0 = -1;
                 for (int y = 0; y < LSIZE; y++) {
@@ -676,7 +695,6 @@ void take2DMeasures(double nextTime) {
                 MZ0 += lastZ0;
                 MZ1 += lastZ1;
                 MS0 += lastS0;
-
                 M2Z0 += pow(lastZ0, 2);
                 M2Z1 += pow(lastZ1, 2);
                 M2S0 += pow(lastS0, 2);
@@ -684,7 +702,6 @@ void take2DMeasures(double nextTime) {
             MZ0 /= (LSIZE - 2);
             MZ1 /= (LSIZE - 2);
             MS0 /= (LSIZE - 2);
-
             M2Z0 /= (LSIZE - 2);
             M2Z1 /= (LSIZE - 2);
             M2S0 /= (LSIZE - 2);
@@ -703,25 +720,27 @@ void take2DMeasures(double nextTime) {
     }
 }
 
-void initiateGenerics() {
-    if (genericsLength <= 0)
+void initiateGenerics(int length) {
+    if (length <= 0 || generics != NULL) {
         return;
+    }
+    genericsLength = length;
     generics = safeMAlloc(genericsLength * sizeof(double));
     for (int i = 0; i < genericsLength; i++) {
         generics[i] = 0;
     }
 }
 
-void printGenerics(int shouldFree) {
+void printGenerics(FILE* f, int shouldFree) {
     if (fCompl == NULL || generics == NULL || genericsLength <= 0) {
         printf("WARNING: trying to write generic measures array with invalid structure");
         return;
     }
     for (int i = 0; i < genericsLength; i++) {
-        fprintf(fCompl, " %.5f", generics[i] / LOOPS);
+        fprintf(f, " %.5f", generics[i] / LOOPS);
     }
-    fprintf(fCompl, "\n");
-    fflush(fCompl);
+    fprintf(f, "\n");
+    fflush(f);
     if (shouldFree) {
         free(generics);
         generics = NULL;

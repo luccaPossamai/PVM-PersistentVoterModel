@@ -6,6 +6,8 @@
 
 matrix/
 
+.clangd
+
 run
 dEtae0
 dEtae-1
