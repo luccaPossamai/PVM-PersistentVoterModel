@@ -1,0 +1,14 @@
+
+*.class
+*.o
+*.out
+*.dat
+
+matrix/
+
+run
+dEtae0
+dEtae-1
+dEtae-2
+dEtae-3
+dEtae-4
