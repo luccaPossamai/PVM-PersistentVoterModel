@@ -1,5 +1,9 @@
+#include <lpfhelper.h>
 #include <lplattice.h>
+#include <lputil.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 void setup(void);
 void mergeOldValues(void);
@@ -38,7 +42,7 @@ void printGenerics(FILE*, int);
 
 //==================Lattice Config.==================//
 
-#define SEED 0 // 123456789// 0: random
+#define SEED 0 // 123456789: random
 
 //==================Lattice Config.==================//
 
@@ -52,7 +56,7 @@ void printGenerics(FILE*, int);
 //==================Temp. Evolution==================//
 
 #define TMIN 1e0 // cant be 0 for scale log
-#define TMAX 1e7
+#define TMAX 1e5
 
 //==================Length Evolution=================//
 
@@ -97,7 +101,7 @@ void printGenerics(FILE*, int);
  * 3: inversionTime1D
  * 4: onBorderWalkEvolution
  */
-#define EVOLUTION 2
+#define EVOLUTION 0
 
 //=================Boundry Condition=================//
 #define FIXED_BORDERS 1
@@ -116,7 +120,7 @@ void printGenerics(FILE*, int);
 
 int N;
 SquareLattice lattice;
-unsigned int seed;
+unsigned int seed = -1;
 FILE *fp1, *fCompl, *fMatrix;
 
 double *eta, *post_eta, dEta;
@@ -262,8 +266,15 @@ void exportBaseSpinMatrix() {
     for (int i = 0; i < N; i++) {
         a[i] = s[i] + 2 * z[i];
     }
-    exportMatrix(a, N);
+    int* b = safeMAlloc(N * sizeof(int));
+    labelClusterEff(b, s, &lattice);
+    if (0) {
+        exportMatrix(a, N);
+    } else {
+        exportMatrix(b, N);
+    }
     free(a);
+    free(b);
 }
 
 void temporalEvolution(void) {
@@ -339,7 +350,9 @@ void lengthEvolution(void) {
         int length = (int)round(lengthArr[i]);
         initiateSquareLattice(&lattice, DIM, length, B);
         N = (int)pow(length, DIM);
-        openFile(&fp1, "length");
+        char name[100];
+        sprintf(name, "length_L%d", length);
+        openFile(&fp1, name);
         writeInstructions(fp1, MODE, 0);
         setup();
 
@@ -615,62 +628,45 @@ void take2DMeasures(double nextTime) {
 
             break;
         case 1: {
-            initiateGenerics(1);
+            initiateGenerics(2);
             int* matrix_SZ = safeMAlloc((int)N * sizeof(int));
             for (int i = 0; i < N; i++) {
                 matrix_SZ[i] = s[i] + 2 * z[i];
             }
 
             int* labSZ = safeMAlloc(N * sizeof(int)); // H-K label matrix of S;
-            labelCluster(labSZ, matrix_SZ, &lattice);
+            int* labS = safeMAlloc(N * sizeof(int));
+            labelClusterEff(labSZ, matrix_SZ, &lattice);
+            labelClusterEff(labS, s, &lattice);
 
-            int i0 = labSZ[0], i1 = labSZ[N - 1];
-            int length = 0;
+            int lOuter = 0, lInner = 0;
+
             for (int i = 0; i < N; i++) {
-                int is0 = labSZ[i] == i0, is1 = labSZ[i] == i1;
-                if (is0 || is1) {
-                    for (int j = 0; j < 3; j++) {
+
+                if (labSZ[i] == labSZ[0] ||
+                    labSZ[i] == labSZ[N - 1]) { // is from one of the bigger clusters
+                    for (int j = 0; j < (int)lattice.neighbours->neighboursCount; j++) {
                         int iNeig = lattice.neighbours->matrix[i][j];
-                        if ((is0 && labSZ[iNeig] != i0) || (is1 && labSZ[iNeig] != i1)) {
-                            length++;
-                        }
+                        if (isValidInteraction(&lattice, i, iNeig) && labSZ[i] != labSZ[iNeig])
+                            lOuter++;
+                    }
+                }
+                if (labS[i] == labS[0]) { //
+                    for (int j = 0; j < (int)lattice.neighbours->neighboursCount; j++) {
+                        int iNeig = lattice.neighbours->matrix[i][j];
+                        if (isValidInteraction(&lattice, i, iNeig) && s[i] != s[iNeig])
+                            lInner++;
                     }
                 }
             }
 
-            generics[0] += (double)length / 2;
-            fprintf(fp1, "%.2f %.2f\n", nextTime, (double)length / 2.0);
+            generics[0] += (double)lOuter / 2;
+            generics[1] += (double)lInner;
+            fprintf(fp1, "%.2f %.2f %.2f\n", nextTime, (double)lOuter / 2.0, (double)lInner);
             fflush(fp1);
-            break;
             free(labSZ);
-            /*
-            int* sizeSZ = safeMAlloc(N * sizeof(int)); // Sizes of clusters;
-            labelCluster(labSZ, matrix_SZ, &lattice);
-            clusterSizeInfo(labSZ, sizeSZ, &nClSZ, &labCl1SZ, &labCl2SZ, &lattice);
-            int lengthCl1SZ =
-                getInterfacialLength(labSZ, &lattice, labCl1SZ); // length of biggest cluster of S
-            int lengthCl2SZ = getInterfacialLength(
-                labSZ, &lattice, labCl2SZ); // length of SECOND biggest cluster of S
-
-            int labCl1S, labCl2S, nClS = 0; // biggestClustersLabels and number of Clusters of S
-            int* labS = safeMAlloc(N * sizeof(int));  // H-K label matrix of S;
-            int* sizeS = safeMAlloc(N * sizeof(int)); // Sizes of clusters;
-            labelCluster(labS, s, &lattice);
-            clusterSizeInfo(labS, sizeS, &nClS, &labCl1S, &labCl2S, &lattice);
-            int lengthCl1S =
-                getInterfacialLength(labS, &lattice, labCl1S); // length of biggest cluster of S
-            int lengthCl2S = getInterfacialLength(labS, &lattice,
-                                                  labCl2S); // length of SECOND biggest cluster of S
-
-            fprintf(fp1, "%.2f %d %d %d %d %d %d\n", nextTime, nClS, lengthCl1S, lengthCl2S, nClSZ,
-                    lengthCl1SZ, lengthCl2SZ);
-
             free(labS);
-            free(matrix_SZ);
-            free(sizeS);
-            free(labSZ);
-            free(sizeSZ);
-            */
+            break;
         }
         case 2: {
             initiateGenerics(6);
@@ -882,7 +878,9 @@ void locMatrixUpdate(int s1, int s2, int* mat, int* locMat) {
 }
 
 void openFile(FILE** f, char* prefix) {
-    seed = setupRandom(SEED);
+    if (seed == -1) {
+        seed = setupRandom(SEED);
+    }
     char name[120];
     sprintf(name, "data_pvm_%s", prefix);
     *f = safeSeedOpen(name, ".dat", &seed, SEED != 0);
@@ -948,7 +946,7 @@ void write2DInstructions(FILE* f, int mode, int isCompl) {
             fprintf(f, "# ╚ t nS0 nZ0 nZ\n");
             break;
         case 1:
-            fprintf(f, "# ╚ t nCl_S 1S_len 2S_len nCl_SZ 1SZ_len 2SZ_len\n");
+            fprintf(f, "# ╚ - | lOuter | lInner \n");
             break;
         case 2:
             if (isCompl) {
