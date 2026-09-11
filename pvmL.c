@@ -39,33 +39,40 @@ void exportBaseSpinMatrix(void);
 void attainConsensus(void);
 void initiateGenerics(int);
 void printGenerics(FILE*, int);
+int mc_biasedwalk(int qual, int end, int* lab, double*);
+
+bool isOnBorder(int);
 
 //==================Lattice Config.==================//
 
-#define SEED 0 // 123456789: random
-
+#ifndef EXPORT_MATRIX
+#define EXPORT_MATRIX 1
+#endif
+#ifndef SEED
+#define SEED 0 // 123456789 //: random
+#endif
 //==================Lattice Config.==================//
 
-#define LSIZE 150
+#define LSIZE 128
+#define HSIZE 128
 #define DIM 2
 
 //==================Generic.Evolution================//
 
-#define DETA 1e-3
+#define DETA 1E-2
 
 //==================Temp. Evolution==================//
 
 #define TMIN 1e0 // cant be 0 for scale log
-#define TMAX 1e5
-
+#define TMAX 1e4
 //==================Length Evolution=================//
 
 #define LMAX 256
-#define LMIN 8
+#define LMIN 32
 
 //==================DEta. Evolution==================//
 
-#define DETAMIN 1e-4
+#define DETAMIN 1e-2
 #define DETAMAX 1e0
 
 //===============Initial Configuration===============//
@@ -80,7 +87,7 @@ void printGenerics(FILE*, int);
 //===============Measures Configuration==============//
 
 // Number of evolution tics
-#define MEASURES 20
+#define MEASURES 30
 
 // Number of loops(only valid for non temporal evolutions)
 #define LOOPS 1e3
@@ -92,8 +99,9 @@ void printGenerics(FILE*, int);
 // 0: Number of zealots
 // 1: Interface Length
 // 2: Instantaneous AR Width
-#define MODE 1
+#define MODE 0
 
+#define ALL_ZEALOTS 1
 /*
  * 0: temporalEvolution
  * 1: reinforcementEvolution
@@ -104,7 +112,7 @@ void printGenerics(FILE*, int);
 #define EVOLUTION 0
 
 //=================Boundry Condition=================//
-#define FIXED_BORDERS 1
+#define FIXED_BORDERS 0
 
 /*
  * "b" = "boundry condition"
@@ -113,13 +121,13 @@ void printGenerics(FILE*, int);
  * 2 -> dobrushin horizontal(periodic vertically)
  * 3 -> square
  */
-#define B 3
-#define EXPORT_MATRIX 0
+#define B 1
 
 // ==================================================//
 
 int N;
-SquareLattice lattice;
+Dimension dimension;
+Lattice lattice;
 unsigned int seed = -1;
 FILE *fp1, *fCompl, *fMatrix;
 
@@ -127,7 +135,6 @@ double *eta, *post_eta, dEta;
 double timeT;
 // always use s and z to measures;
 int *s, *post_s, *z, *post_z;
-
 //===============DIM: 2; MODE: 1=====================//
 // int nClS_M, lengthCl1S_M, lengthCl2S_M, nClSZ_M, lengthCl1SZ_M, lengthCl2SZ_M;
 
@@ -143,16 +150,19 @@ double* generics = NULL;
 int genericsLength = 0;
 
 int main() {
-    N = pow(LSIZE, DIM);
-    initiateSquareLattice(&lattice, DIM, LSIZE, B);
+    createDimension(&dimension, DIM, (size_t[]){LSIZE, HSIZE});
+    N = dimension.size;
+    createLattice(&lattice, &dimension, B);
 
-    if (EXPORT_MATRIX)
-        fMatrix = fopen("matrix.dat", "w");
+    if (EXPORT_MATRIX) {
+        fMatrix = fopen("matrix.dat", "wb");
+    }
     setup();
     initiate();
     clear();
-    if (EXPORT_MATRIX)
+    if (EXPORT_MATRIX && fMatrix != NULL) {
         fclose(fMatrix);
+    }
     return 0;
 }
 
@@ -161,7 +171,6 @@ void initiate(void) {
     switch (EVOLUTION) {
         case 0: // temporalEvolution
             temporalEvolution();
-            fclose(fp1);
             break;
         case 1:
             reinforcementEvolution();
@@ -206,20 +215,41 @@ void memoryAllocation(void) {
     post_eta = safeMAlloc(N * sizeof(double));
 }
 
+bool isOnBorder(int i) {
+
+    bool f = false;
+    for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
+        // IS A BORDER IF A INTERACTION IS BLOCKED
+        if (!isValidInteraction(&lattice, i, lattice.neighbours->matrix[i][j])) {
+            f = true;
+            break;
+        }
+    }
+    return f;
+}
+
 void buildInitialConfiguration(void) {
     switch (C) {
         case 0:
             for (int i = 0; i < N; i++) {
                 post_s[i] = randomInt(2);
-                post_z[i] = 1;
-                post_eta[i] = 1.0;
+                post_z[i] = ALL_ZEALOTS;
+                post_eta[i] = ALL_ZEALOTS;
+                if (FIXED_BORDERS && isOnBorder(i)) {
+                    post_z[i] = 1;
+                    post_eta[i] = 1.0;
+                }
             }
             break;
         case 1:
             for (int i = 0; i < N; i++) {
                 post_s[i] = i < (N / 2) ? 0 : 1;
-                post_z[i] = 1;
-                post_eta[i] = 1.0;
+                post_z[i] = ALL_ZEALOTS;
+                post_eta[i] = ALL_ZEALOTS;
+                if (FIXED_BORDERS && isOnBorder(i)) {
+                    post_z[i] = 1;
+                    post_eta[i] = 1.0;
+                }
             }
             break;
         case 2: {
@@ -230,9 +260,9 @@ void buildInitialConfiguration(void) {
             for (int i = 0; i < N; i++) {
                 int x = i % LSIZE, y = i / LSIZE;
                 float distance = sqrt(pow(x - x0, 2) + pow(y - y0, 2));
-                post_s[i] = distance <= (float)lattice.L / 4.0f ? 0 : 1;
-                post_z[i] = 1;
-                post_eta[i] = 1.0;
+                post_s[i] = distance <= (float)LSIZE / 4.0f ? 0 : 1;
+                post_z[i] = ALL_ZEALOTS;
+                post_eta[i] = ALL_ZEALOTS;
             }
             break;
         }
@@ -254,7 +284,7 @@ void buildInitialMobileMatrix(void) {
     }
 }
 
-void exportMatrix(int* s, int sizeN) {
+void exportMatrix(const int* s, int sizeN) {
     for (int i = 0; i < sizeN; i++) {
         fprintf(fMatrix, "%d ", s[i]);
     }
@@ -262,19 +292,13 @@ void exportMatrix(int* s, int sizeN) {
 }
 
 void exportBaseSpinMatrix() {
-    int* a = safeMAlloc(N * sizeof(int));
+    int* arr = safeMAlloc((int)N * sizeof(int));
+
     for (int i = 0; i < N; i++) {
-        a[i] = s[i] + 2 * z[i];
+        arr[i] = s[i] + 2 * z[i];
     }
-    int* b = safeMAlloc(N * sizeof(int));
-    labelClusterEff(b, s, &lattice);
-    if (0) {
-        exportMatrix(a, N);
-    } else {
-        exportMatrix(b, N);
-    }
-    free(a);
-    free(b);
+    exportMatrix(arr, N);
+    free(arr);
 }
 
 void temporalEvolution(void) {
@@ -289,17 +313,19 @@ void temporalEvolution(void) {
 
     timeT = 0.0;
     double nextTime = 0.0;
-    buildInitialConfiguration();
     dEta = (double)DETA;
+    buildInitialConfiguration();
 
-    if (EXPORT_MATRIX)
+    if (EXPORT_MATRIX) {
         exportBaseSpinMatrix();
+    }
     for (int i = 0; i < MEASURES; i++) {
         nextTime = (double)time_arr[i];
         evolveSystemTo(nextTime);
         takeMeasures(nextTime);
     }
     free(time_arr);
+    fclose(fp1);
 }
 
 void attainConsensus(void) {
@@ -348,7 +374,8 @@ void lengthEvolution(void) {
     for (int i = 0; i < (int)MEASURES; i++) {
         clear();
         int length = (int)round(lengthArr[i]);
-        initiateSquareLattice(&lattice, DIM, length, B);
+        createDimension(&dimension, DIM, (size_t[]){LSIZE, HSIZE});
+        createLattice(&lattice, &dimension, B);
         N = (int)pow(length, DIM);
         char name[100];
         sprintf(name, "length_L%d", length);
@@ -557,8 +584,8 @@ void inversionTime1D() {
 }
 
 void w1DBorders(int* b1, int* b2) {
-    int f1 = 1, f2 = f1, i1 = 0, i2 = lattice.size - 1;
-    for (int i = 0; i < lattice.size; i++) {
+    int f1 = 1, f2 = f1, i1 = 0, i2 = lattice.dimension.size - 1;
+    for (int i = 0; i < lattice.dimension.size; i++) {
         if (f1) {
             if (s[i] == s[i1] && z[i]) {
                 *b1 = i;
@@ -608,6 +635,159 @@ void take1DMeasures(double nextTime) {
         }
     }
 }
+
+void testtt(double t) {
+    initiateGenerics(6);
+    int* matrix_S0Z = safeMAlloc((int)N * sizeof(int));
+    int* plot = safeMAlloc((int)N * sizeof(int));
+
+    int* labSZ = safeMAlloc(N * sizeof(int)); // H-K label matrix of S;
+    int* labS = safeMAlloc(N * sizeof(int));
+
+    int* tempS = safeMAlloc((int)N * sizeof(int));
+    int* tempZ = safeMAlloc((int)N * sizeof(int));
+
+    int* onInnerLength = safeMAlloc(2 * N * sizeof(int));
+    int* onOuterLength = safeMAlloc(2 * N * sizeof(int));
+
+    double* maxHSPerX = safeMAlloc((int)(LSIZE - 2) * sizeof(double));
+    double* maxHSZPerX = safeMAlloc((int)(LSIZE - 2) * sizeof(double));
+
+    int inCount = 0, outCount = 0;
+    for (int i = 0; i < N; i++) {
+        plot[i] = s[i] + 2 * z[i];
+        matrix_S0Z[i] = s[i] + 2 * z[i] == 2 ? 2 : -3;
+        onInnerLength[i] = -1;
+        onOuterLength[i] = -1;
+        if (i < LSIZE - 2) {
+            maxHSPerX[i] = NAN;
+            maxHSZPerX[i] = NAN;
+        }
+    }
+
+    labelCluster(labSZ, matrix_S0Z, &lattice);
+    labelCluster(labS, s, &lattice);
+
+    for (int i = 0; i < N; i++) {
+        tempS[i] = labS[i] == labS[0];
+        tempZ[i] = labSZ[i] == labSZ[0];
+    }
+
+    labelCluster(labS, tempS, &lattice);
+    labelCluster(labSZ, tempZ, &lattice);
+
+    int l_Inner = 0, l_Outer = 0;
+
+    double hSM = 0, hSZM = 0;
+    int hSCount = 0, hSZCount = 0;
+    for (int i = 0; i < N; i++) {
+        int x = i % LSIZE, y = (int)floor(i / (float)LSIZE);
+
+        if (x == 0 || x == LSIZE - 1)
+            continue;
+        if (labS[i] == labS[0]) {
+            for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
+                int neig = lattice.neighbours->matrix[i][j];
+                if (labS[neig] == labS[N - 1]) {
+                    if (isValidInteraction(&lattice, i, neig)) {
+                        plot[i] = -1;
+                        l_Inner++;
+                        if (j == 2 || j == 3) {
+                            onInnerLength[inCount] = i;
+                            inCount++;
+                            plot[i] = -3;
+                            hSM += y;
+                            hSCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (labSZ[i] == labSZ[0]) {
+            for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
+                int neig = lattice.neighbours->matrix[i][j];
+                if (labSZ[neig] == labSZ[N - 1]) {
+                    if (isValidInteraction(&lattice, i, neig)) {
+                        plot[i] = -2;
+                        l_Outer++;
+                        if (j == 2 || j == 3) {
+                            onOuterLength[outCount] = i;
+                            outCount++;
+                            hSZM += y;
+                            hSZCount++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    hSM /= hSCount;
+    hSZM /= hSZCount;
+
+    double hS2M = 0, hSZ2M = 0;
+    hSCount = 0, hSZCount = 0;
+    for (int index = 0; index < inCount; index++) {
+        int i = onInnerLength[index];
+        int x = i % LSIZE, y = (int)floor(i / (float)LSIZE);
+        bool f = maxHSPerX[x - 1] != maxHSPerX[x - 1];
+
+        if (f || fabs(maxHSPerX[x - 1] - hSM) < fabs(y - hSM)) {
+            maxHSPerX[x - 1] = y - hSM;
+        }
+    }
+
+    for (int index = 0; index < outCount; index++) {
+        int i = onOuterLength[index];
+        int x = i % LSIZE, y = (int)floor(i / (float)LSIZE);
+        bool f = maxHSZPerX[x - 1] != maxHSZPerX[x - 1];
+        if (f || fabs(maxHSZPerX[x - 1]) < fabs(y - hSZM)) {
+            maxHSZPerX[x - 1] = y - hSZM;
+        }
+    }
+
+    for (int i = 0; i < LSIZE - 2; i++) {
+        if (maxHSPerX[i] == maxHSPerX[i]) {
+            hS2M += (double)maxHSPerX[i] * (double)maxHSPerX[i];
+        }
+        if (maxHSZPerX[i] == maxHSZPerX[i]) {
+            hSZ2M += (double)maxHSZPerX[i] * (double)maxHSZPerX[i];
+        }
+    }
+
+    hS2M /= (LSIZE - 2);
+    hSZ2M /= (LSIZE - 2);
+
+    if (EXPORT_MATRIX) {
+        // exportMatrix(plot, N);
+    }
+
+    double w_Inner2 = hS2M;
+    double w_Outer2 = hSZ2M;
+
+    generics[0] = l_Inner;
+    generics[1] = (l_Inner * l_Inner);
+    generics[2] = w_Inner2;
+    generics[3] = l_Outer;
+    generics[4] = (l_Outer * l_Outer);
+    generics[5] = w_Outer2;
+
+    fprintf(fp1, "%.2f %.2f %.2f %.2f %.2f %.2f %.2f\n", t, (double)l_Inner, pow(l_Inner, 2),
+            w_Inner2, (double)l_Outer, pow(l_Outer, 2), w_Outer2);
+    fflush(fp1);
+    free(matrix_S0Z);
+    free(plot);
+    free(labSZ);
+    free(labS);
+    free(tempS);
+    free(tempZ);
+    free(onOuterLength);
+    free(onInnerLength);
+    free(maxHSPerX);
+    free(maxHSZPerX);
+}
+
 void take2DMeasures(double nextTime) {
     switch (MODE) {
         case 0:
@@ -628,7 +808,9 @@ void take2DMeasures(double nextTime) {
 
             break;
         case 1: {
-            initiateGenerics(2);
+            testtt(nextTime);
+            break;
+            initiateGenerics(6);
             int* matrix_SZ = safeMAlloc((int)N * sizeof(int));
             for (int i = 0; i < N; i++) {
                 matrix_SZ[i] = s[i] + 2 * z[i];
@@ -636,34 +818,90 @@ void take2DMeasures(double nextTime) {
 
             int* labSZ = safeMAlloc(N * sizeof(int)); // H-K label matrix of S;
             int* labS = safeMAlloc(N * sizeof(int));
-            labelClusterEff(labSZ, matrix_SZ, &lattice);
-            labelClusterEff(labS, s, &lattice);
+            labelCluster(labSZ, matrix_SZ, &lattice);
+            labelCluster(labS, s, &lattice);
 
-            int lOuter = 0, lInner = 0;
+            int l_Inner = 0, inCount = 0;
+            double innerY = 0, innerY2 = 0;
+
+            int l_Outer = 0, outCount = 0;
+            double outerY = 0, outerY2 = 0;
 
             for (int i = 0; i < N; i++) {
-
-                if (labSZ[i] == labSZ[0] ||
-                    labSZ[i] == labSZ[N - 1]) { // is from one of the bigger clusters
-                    for (int j = 0; j < (int)lattice.neighbours->neighboursCount; j++) {
-                        int iNeig = lattice.neighbours->matrix[i][j];
-                        if (isValidInteraction(&lattice, i, iNeig) && labSZ[i] != labSZ[iNeig])
-                            lOuter++;
+                int x = i % LSIZE, y = (int)floor(i / (float)LSIZE);
+                if (x == 0 || x == LSIZE - 1)
+                    continue;
+                bool in = false, out = false;
+                if (labS[i] == labS[0]) {
+                    for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
+                        if (labS[lattice.neighbours->matrix[i][j]] != labS[0]) {
+                            if (isValidInteraction(&lattice, i, lattice.neighbours->matrix[i][j])) {
+                                l_Inner++;
+                                in = true;
+                            }
+                        }
                     }
                 }
-                if (labS[i] == labS[0]) { //
-                    for (int j = 0; j < (int)lattice.neighbours->neighboursCount; j++) {
-                        int iNeig = lattice.neighbours->matrix[i][j];
-                        if (isValidInteraction(&lattice, i, iNeig) && s[i] != s[iNeig])
-                            lInner++;
+
+                if (labSZ[i] == labSZ[0]) {
+                    for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
+                        if (labSZ[lattice.neighbours->matrix[i][j]] != labSZ[0]) {
+                            if (isValidInteraction(&lattice, i, lattice.neighbours->matrix[i][j])) {
+                                l_Outer++;
+                                out = true;
+                            }
+                        }
                     }
+                }
+                if (in) {
+                    inCount++;
+                    innerY += y;
+                    innerY2 += y * y;
+                }
+                if (out) {
+                    outCount++;
+                    outerY += y;
+                    outerY2 += y * y;
                 }
             }
+            if (inCount > 0) {
+                innerY /= (float)inCount;
+                innerY2 /= (float)inCount;
+            }
+            if (outCount > 0) {
+                outerY /= (float)outCount;
+                outerY2 /= (float)outCount;
+            }
+            double w_Inner2 = innerY2 - (innerY * innerY);
+            double w_Outer2 = outerY2 - (outerY * outerY);
 
-            generics[0] += (double)lOuter / 2;
-            generics[1] += (double)lInner;
-            fprintf(fp1, "%.2f %.2f %.2f\n", nextTime, (double)lOuter / 2.0, (double)lInner);
+            generics[0] = l_Inner;
+            generics[1] = (l_Inner * l_Inner);
+            generics[2] = w_Inner2;
+            generics[3] = l_Outer;
+            generics[4] = (l_Outer * l_Outer);
+            generics[5] = w_Outer2;
+
+            fprintf(fp1, "%.2f %.2f %.2f %.2f %.2f %.2f %.2f\n", nextTime, (double)l_Inner,
+                    pow(l_Inner, 2), w_Inner2, (double)l_Outer, pow(l_Outer, 2), w_Outer2);
+            /*
+            double w_Inner = 0, w_Outer1 = 0;
+            int l_Inner = 0, l_Outer1 = 0;
+            l_Inner = mc_biasedwalk((LSIZE / 2 - 1) * LSIZE, (N / 2) - 1, labS, &w_Inner);
+            l_Outer1 = mc_biasedwalk((LSIZE / 2 - 1) * LSIZE, (N / 2) - 1, labSZ, &w_Outer1);
+
+            generics[0] = l_Inner;
+            generics[1] = pow(l_Inner, 2);
+            generics[2] = w_Inner;
+            generics[3] = l_Outer1;
+            generics[4] = pow(l_Outer1, 2);
+            generics[5] = w_Outer1;
+
+            fprintf(fp1, "%.2f %.2f %.2f %.2f %.2f %.2f %.2f\n", nextTime, (double)l_Inner,
+                    pow(l_Inner, 2), w_Inner, (double)l_Outer1, pow(l_Outer1, 2), w_Outer1);
+            */
             fflush(fp1);
+            free(matrix_SZ);
             free(labSZ);
             free(labS);
             break;
@@ -764,7 +1002,7 @@ void clear(void) {
     free(post_eta);
     free(mobile);
     free(locMobile);
-    clearSquareLattice(&lattice);
+    destroyLattice(&lattice);
 }
 
 //==================Virtual Environment==================//
@@ -797,7 +1035,7 @@ void singleInteraction(void) {
 
         } else if (DIM == 2) {
             int x = pPos % LSIZE, y = pPos / LSIZE;
-            int on2DBorder = y == 0 || y == LSIZE - 1;
+            int on2DBorder = y == 0 || y == HSIZE - 1;
             on2DBorder |= (B == 3 && (x == 0 || x == LSIZE - 1));
             if (on2DBorder) {
                 // printf("%d\n", pPos);
@@ -854,7 +1092,8 @@ void updateMobileMatrix(int i) {
     }
 }
 int isMobile(int i) {
-    if (post_z[i] == 1) {
+    bool f = dEta == 0.0;
+    if (post_z[i] == 1 || f) {
         for (int j = 0; j < lattice.neighbours->neighboursCount; j++) {
             int neigIndex = lattice.neighbours->matrix[i][j];
             if (post_s[neigIndex] != post_s[i]) {
@@ -901,10 +1140,12 @@ void writeInstructions(FILE* f, int mode, int isCompl) {
         case 0:
             fprintf(f, "# ║ dEta = %.5f\n", DETA);
             fprintf(f, "# ║ L = %d\n", (int)LSIZE);
+            fprintf(f, "# ║ H = %d\n", (int)HSIZE);
             fprintf(f, "# ║ t: [%d, %d]\n", (int)TMIN, (int)TMAX);
             break;
         case 1:
             fprintf(f, "# ║ L = %d\n", (int)LSIZE);
+            fprintf(f, "# ║ H = %d\n", (int)HSIZE);
             if (isCompl) {
                 fprintf(f, "# ║ loops: %d\n", (int)LOOPS);
                 fprintf(f, "# ║ dEta: [%.5f, %.5f]\n", (double)DETAMIN, (double)DETAMAX);
@@ -914,11 +1155,12 @@ void writeInstructions(FILE* f, int mode, int isCompl) {
             break;
         case 2:
             fprintf(f, "# ║ dEta = %.5f\n", DETA);
+            fprintf(f, "# ║ H = %d\n", (int)HSIZE);
             if (isCompl) {
                 fprintf(f, "# ║ loops: %d\n", (int)LOOPS);
                 fprintf(f, "# ║ L: [%d, %d]\n", (int)LMIN, (int)LMAX);
             } else {
-                fprintf(f, "# ║ L: %d\n", (int)lattice.L);
+                fprintf(f, "# ║ L: %d\n", (int)lattice.dimension.proportions[0]);
             }
             break;
         case 8:
@@ -946,7 +1188,7 @@ void write2DInstructions(FILE* f, int mode, int isCompl) {
             fprintf(f, "# ╚ t nS0 nZ0 nZ\n");
             break;
         case 1:
-            fprintf(f, "# ╚ - | lOuter | lInner \n");
+            fprintf(f, "# ╚ t | lInner | lInner2 | wInner | lOuter | lOuter2 | wOuter \n");
             break;
         case 2:
             if (isCompl) {
@@ -985,4 +1227,136 @@ void write1DInstructions(FILE* f, int mode, int isCompl) {
                 fprintf(f, "#  t eta0\n");
             }
     }
+}
+
+/*************************************************************************
+ * *                     Biased walks along the external hull               *
+ * *                          Last modified: 17/06/2024                     *
+ * * Returns the area enclosed by the hull, despite the presence of smaller *
+ * * internal domains. We depart from the cluster labelling site (smaller   *
+ * * index), and the initial contribution to the area is LSIZE+1. Then we   *
+ * * attempt to walk along the left, front, right or backward directions.   *
+ * * The incoming (backward) direction is only accepted if it's not         *
+ * * possible to go on the other directions. We choose the height of the    *
+ * * initial size as 10*LSIZE and update the height along the walk.         *
+ * * Percolating clusters are not taken into account since the walls are    *
+ * * disconnected in that case. The area is also updated along the walk     *
+ * * using  the following table (the column shows the precedent step):      *
+ * *                                                                        *
+ * *              up     right    down   left                               *
+ * *  up (0)       0      h+1      h+1     0                                *
+ * *  right (3)    0      h+1      -h      1                                *
+ * *  down (2)    -h      0        0      -h                                *
+ * *  left (1)    -h      1        0      h+1                               *
+ * *                                                                        *
+ * *                                                                        *
+ * *************************************************************************/
+
+int mc_biasedwalk(int qual, int end, int* lab, double* w2) {
+    int i = 0, dir = 0, ok;
+
+    if (lab[qual] != lab[end]) {
+        printf("Unable to calculate length of interface, start and end points are not connected");
+        return -1;
+    }
+
+    /* First check whether the starting point has one or two branches going out. If there
+     *    are two branches connected by the starting point, the configuration shoulbe be:  11
+     *                                                                                        10
+     *                                                                                           The
+     * walk will first go through the horizontal branch and, in order to go to the down branch
+     * it should pass over the initial site, but we should not stop the walk there. To do this,
+     * we set endpoint=0. When the walk returns from the horizontal branch, we set it to 1, so
+     * the walk can stop the next time it visits the starting point. Notice however that the
+     * horizontal branch may close the loop and join the down one without passing through the
+     * starting point. For example:  111 101 111                              */
+    int iR = lattice.neighbours->matrix[qual][0], iL = lattice.neighbours->matrix[qual][1],
+        iD = lattice.neighbours->matrix[qual][2], iU = lattice.neighbours->matrix[qual][3];
+
+    /* from the starting point, choose the direction to move, there are just 2 possibilities
+     * (from the way we choose it): */
+    if (lab[iR] == lab[qual]) {
+        dir = 3;
+        i = iR;
+    } else if (lab[iD] == lab[qual]) {
+        dir = 2;
+        i = iD;
+    }
+
+    int* arr = safeMAlloc(N * sizeof(int));
+
+    for (int i = 0; i < N; i++) {
+        arr[i] = s[i] + 2 * z[i];
+    }
+    /* start the walk around the cluster, clockwise: */
+
+    int length = 0, count = 0;
+    double yM = 0, y2M = 0;
+    while (i != end)
+    /* while the walk doesn't return to the starting point, or if it returns, it can continue to
+       the other branch */
+    {
+        if (i == end)
+            break;
+
+        dir = (dir + 1) % 4; /* from the incoming direction, try left first */
+
+        iR = lattice.neighbours->matrix[i][0], iL = lattice.neighbours->matrix[i][1],
+        iD = lattice.neighbours->matrix[i][2], iU = lattice.neighbours->matrix[i][3];
+
+        int l = (lab[iR] != lab[qual]) + (lab[iU] != lab[qual]) + (lab[iL] != lab[qual]) +
+                (lab[iD] != lab[qual]);
+
+        int x = i % LSIZE;
+        int yi = (int)floor(i / (float)LSIZE);
+        if (x != 0 && x != LSIZE - 1) {
+            length += l;
+            yM += yi;
+            y2M += pow(yi, 2);
+            count++;
+        }
+        if (l != 0) {
+            arr[i] = -2;
+        }
+
+        ok = 0;
+        while (!ok) /* from the incoming direction: try right, in front, left and backwards */
+        {
+            switch (dir) {
+                case 0:
+                    if (lab[iU] == lab[i]) {
+                        ok = 1;
+                        i = iU;
+                    }
+                    break;
+                case 1:
+                    if (lab[iL] == lab[i]) {
+                        ok = 1;
+                        i = iL;
+                    }
+                    break;
+                case 2:
+                    if (lab[iD] == lab[i]) {
+                        ok = 1;
+                        i = iD;
+                    }
+                    break;
+                case 3:
+                    if (lab[iR] == lab[i]) {
+                        ok = 1;
+                        i = iR;
+                    }
+                    break;
+            }
+            if (ok == 0)
+                dir = (dir + 3) % 4;
+        }
+    }
+    yM /= count;
+    y2M /= count;
+    *w2 = y2M - pow(yM, 2);
+    if (EXPORT_MATRIX)
+        exportMatrix(arr, N);
+    free(arr);
+    return length;
 }

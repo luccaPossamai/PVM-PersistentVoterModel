@@ -16,4 +16,9 @@ void writeHeader(FILE* file,
                  const char* titleString,
                  const char* authorString);
 
+void writeHeaderField(FILE* f, 
+                      const char* fmt, 
+                      ...);
+
+
 #endif
